@@ -58,31 +58,29 @@ def require_login():
     if st.session_state.get("supabase_user"):
         return
     st.title("AI Assistant")
-    client = st.session_state.get("supabase_client") or auth_db.create_client()
-    st.session_state["supabase_client"] = client
+    client = auth_db.new_client()
     sign_in_tab, sign_up_tab = st.tabs(["Sign in", "Create account"])
     with sign_in_tab, st.form("supabase_sign_in"):
         email = st.text_input("Email")
         password = st.text_input("Password", type="password")
         if st.form_submit_button("Sign in", type="primary"):
             try:
-                user = auth_db.sign_in(client, email, password)
+                auth_db.save_login(auth_db.sign_in(client, email, password))
             except Exception as error:
                 st.error(f"Sign in failed: {error}")
             else:
-                st.session_state["supabase_user"] = user.email
                 st.rerun()
     with sign_up_tab, st.form("supabase_sign_up"):
         new_email = st.text_input("Email", key="signup_email")
         new_password = st.text_input("Password (min 6 characters)", type="password", key="signup_password")
         if st.form_submit_button("Create account"):
             try:
-                _, signed_in = auth_db.sign_up(client, new_email, new_password)
+                response = auth_db.sign_up(client, new_email, new_password)
             except Exception as error:
                 st.error(f"Sign up failed: {error}")
             else:
-                if signed_in:
-                    st.session_state["supabase_user"] = new_email.strip()
+                if response.session:
+                    auth_db.save_login(response)
                     st.rerun()
                 st.success("Account created. Confirm the email we sent, then sign in.")
     st.stop()
@@ -109,10 +107,8 @@ with st.sidebar:
     if st.session_state.get("supabase_user"):
         st.caption(f"Signed in as {st.session_state['supabase_user']}")
     if st.button("Sign out" if st.session_state.get("supabase_user") else "Lock app"):
-        if st.session_state.get("supabase_client"):
-            auth_db.sign_out(st.session_state["supabase_client"])
-        for key in ("authenticated", "supabase_user", "supabase_client"):
-            st.session_state.pop(key, None)
+        auth_db.sign_out()
+        st.session_state.pop("authenticated", None)
         st.rerun()
     st.subheader("Ollama connection")
     ollama_host = get_ollama_host()
@@ -328,13 +324,15 @@ list_tab, search_tab, ask_tab, cloud_tab = st.tabs(
 )
 
 with cloud_tab:
-    cloud_client = st.session_state.get("supabase_client")
-    if not st.session_state.get("supabase_user") or cloud_client is None:
+    if not st.session_state.get("supabase_user"):
         st.info("Sign in with Supabase to see meetings synced from your computer.")
     else:
         st.caption("Run `python sync_meeting.py` on your computer to upload new meetings.")
         try:
-            cloud_meetings = auth_db.list_meetings(cloud_client)
+            cloud_meetings = auth_db.list_meetings(auth_db.client_for_user())
+        except PermissionError:
+            auth_db.sign_out()
+            st.rerun()
         except Exception as error:
             st.error(f"Could not load cloud meetings: {error}")
             cloud_meetings = []

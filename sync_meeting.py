@@ -30,7 +30,7 @@ def sync(limit=500):
     email = os.environ.get("SYNC_EMAIL") or input("Supabase email: ")
     password = os.environ.get("SYNC_PASSWORD") or getpass.getpass("Password: ")
 
-    client = auth_db.create_client()
+    client = auth_db.new_client()
     auth_db.sign_in(client, email, password)
 
     synced = 0
@@ -51,7 +51,7 @@ def sync(limit=500):
             },
         )
         synced += 1
-    auth_db.sign_out(client)
+    client.auth.sign_out()
     print(f"Synced {synced} meeting(s) to Supabase.")
 
 

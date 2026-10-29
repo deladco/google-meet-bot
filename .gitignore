@@ -16,6 +16,7 @@ __pycache__/
 *$py.class
 
 # Local meeting data and browser profiles
+node_modules/
 output/
 bot_profile/
 meeting_history.sqlite3*

@@ -1,0 +1,25 @@
+{
+  "name": "google-meet-bot",
+  "version": "1.0.0",
+  "description": "A single-host prototype for processing uploaded meeting recordings. Streamlit serves the dashboard; Faster-Whisper, pyannote.audio, Ollama, and SQLite run on the same server. Original uploads are processed from a temporary file and discarded; transcripts, speaker labels, notes, structured action items, and the SQLite history are persisted.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/deladco/google-meet-bot.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/deladco/google-meet-bot/issues"
+  },
+  "homepage": "https://github.com/deladco/google-meet-bot#readme",
+  "dependencies": {
+    "@supabase/ssr": "^0.12.7",
+    "@supabase/supabase-js": "^2.118.0"
+  }
+}
