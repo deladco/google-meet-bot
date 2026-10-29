@@ -101,7 +101,7 @@ def list_meetings(client, limit=200):
         return query.order("recorded_at", desc=True).limit(limit).execute().data
 
 
-def save_meeting_from_history(client, meeting, owner_email=None):
+def save_meeting_from_history(client, meeting, owner_email=None, user_id=None):
     """Persist one local history row (and its files) to Supabase so it survives redeploys."""
     import json
     from pathlib import Path
@@ -118,6 +118,8 @@ def save_meeting_from_history(client, meeting, owner_email=None):
         "notes": read(meeting["notes_path"]),
         "minutes": json.loads(meeting["minutes_json"]) if meeting["minutes_json"] else None,
     }
+    if user_id:
+        row["user_id"] = user_id
     try:
         return upsert_meeting(client, {**row, "owner_email": owner_email})
     except Exception:

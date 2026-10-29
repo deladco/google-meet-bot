@@ -1,0 +1,24 @@
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    BOT_HEADLESS=1 \
+    BOT_PULSE_SOURCE=auto_null.monitor
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg libsndfile1 pulseaudio \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY requirements-server.txt ./requirements-server.txt
+RUN python -m pip install --upgrade pip \
+    && python -m pip install -r requirements-server.txt \
+    && python -m playwright install --with-deps chromium
+
+COPY . .
+RUN mkdir -p /app/data /app/output /app/models
+
+# Virtual speaker: Chromium plays the meeting into the null sink, ffmpeg records its monitor.
+CMD ["sh", "-c", "pulseaudio -D --exit-idle-time=-1 --system=false && pactl load-module module-null-sink sink_name=auto_null && python bot_worker.py"]

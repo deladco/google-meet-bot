@@ -341,8 +341,8 @@ elif audio_source == "Send AI bot to a meeting":
         "participant named below, records it, and then transcribes it. Admit it from the "
         "lobby if asked. Everyone in the meeting will see the bot."
     )
-    if not meeting_bot.is_configured():
-        st.info("Set `RECALL_API_KEY` (and optionally `RECALL_REGION`) in the app secrets to enable the bot.")
+    if not (meeting_bot.is_configured() and st.session_state.get("supabase_user")):
+        st.info("Sign in with Supabase to send the bot to a meeting.")
     else:
         bot_url = st.text_input("Meeting link", placeholder="https://meet.google.com/abc-defg-hij")
         bot_name = st.text_input("Bot name", value="AI Assistant")
@@ -352,37 +352,38 @@ elif audio_source == "Send AI bot to a meeting":
             disabled=not (consent_confirmed and bot_url.strip()),
         ):
             try:
-                st.session_state["active_bot_id"] = meeting_bot.join_meeting(bot_url, bot_name)
-                st.session_state.pop("last_recording_result", None)
+                st.session_state["active_bot_id"] = meeting_bot.join_meeting(
+                    auth_db.client_for_user(), bot_url, bot_name, viewer_email
+                )
             except Exception as error:
-                st.error(f"Could not start the bot: {error}")
+                st.error(f"Could not queue the bot: {error}")
         if not consent_confirmed:
             st.info("Confirm recording consent above to send the bot.")
 
         bot_id = st.session_state.get("active_bot_id")
         if bot_id:
             try:
-                bot = meeting_bot.get_bot(bot_id)
-                code = meeting_bot.status_code(bot)
+                db = auth_db.client_for_user()
+                job = meeting_bot.get_job(db, bot_id)
+                code = job["status"] if job else "cancelled"
                 st.write(f"**Bot status:** {meeting_bot.describe_status(code)}")
-                if code in meeting_bot.FAILED:
-                    st.error("The bot could not record this meeting.")
-                elif code in meeting_bot.FINISHED:
-                    if st.session_state.get("processed_bot_id") != bot_id:
-                        audio = meeting_bot.download_audio(bot)
-                        result = process_audio(audio, "bot-recording.mp3")
-                        st.session_state["processed_bot_id"] = bot_id
-                        st.session_state["last_recording_result"] = result
-                else:
+                if code == "queued":
+                    st.caption(
+                        "The bot worker (`python bot_worker.py`) must be running on a computer "
+                        "or server to pick this up."
+                    )
+                if job and job.get("message"):
+                    st.caption(job["message"])
+                if code in meeting_bot.FINISHED:
+                    st.success("Finished. Open the Cloud tab to read the notes and transcript.")
+                elif code not in meeting_bot.FAILED:
                     left_col, right_col = st.columns(2)
                     left_col.button("Refresh status")
                     if right_col.button("Make the bot leave now"):
-                        meeting_bot.leave_meeting(bot_id)
+                        meeting_bot.leave_meeting(db, bot_id)
                         st.rerun()
             except Exception as error:
                 st.error(f"Bot error: {error}")
-    if st.session_state.get("last_recording_result"):
-        show_processing_result(st.session_state["last_recording_result"])
 elif audio_source == "Tabs / system audio + microphone":
     st.caption(
         "Records the other participants together with your microphone. Click Start, then in the "
