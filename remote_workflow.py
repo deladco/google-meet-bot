@@ -1,3 +1,4 @@
+import gc
 import json
 import os
 import tempfile
@@ -33,6 +34,12 @@ def _whisper_model():
 
     model_name = os.getenv("WHISPER_MODEL", "base")
     return WhisperModel(model_name, device="cpu", compute_type="int8")
+
+
+def _release_whisper():
+    # Free the speech model before diarization/analysis to stay under the host's RAM limit.
+    _whisper_model.cache_clear()
+    gc.collect()
 
 
 def _write_pcm_wav(path, samples, sample_rate):
@@ -84,7 +91,7 @@ def _drop_repeated_loops(entries):
 def _transcribe_samples(whisper, samples, meeting_time, vad_filter):
     segments, _ = whisper.transcribe(
         _normalize_level(samples),
-        beam_size=5,
+        beam_size=3,
         language=os.getenv("WHISPER_LANGUAGE") or None,
         vad_filter=vad_filter,
         condition_on_previous_text=False,
@@ -194,6 +201,7 @@ def process_uploaded_recording(
                     "error": message,
                 }
 
+            _release_whisper()
             _write_jsonl(transcript_path, entries)
             history.index_file(session_id, "transcript", transcript_path)
             history.update_status(session_id, "transcribed")
