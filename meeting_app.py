@@ -21,6 +21,7 @@ from remote_config import (
     get_setting,
 )
 from remote_workflow import process_uploaded_recording
+from tab_recorder import tab_recorder
 
 st.set_page_config(page_title="AI Assistant", layout="wide")
 
@@ -166,7 +167,7 @@ def display_status(meeting):
 st.subheader("Record or process a meeting")
 audio_source = st.segmented_control(
     "Recording source",
-    options=["Browser microphone", "Upload file"],
+    options=["Browser microphone", "Tabs / system audio + microphone", "Upload file"],
     default="Browser microphone",
     key="audio_source",
 )
@@ -328,6 +329,30 @@ if audio_source == "Browser microphone":
                     st.error(f"Meeting processing failed: {error}")
             if st.session_state.get("last_recording_result"):
                 show_processing_result(st.session_state["last_recording_result"])
+elif audio_source == "Tabs / system audio + microphone":
+    st.caption(
+        "Records the other participants together with your microphone. Click Start, then in the "
+        "browser prompt either pick the Meet tab and tick **Share tab audio**, or pick "
+        "**Entire screen** and tick **Share system audio** to capture audio from all tabs "
+        "and apps (Chrome/Edge on Windows or ChromeOS; Mac can only share a single tab's audio). "
+        "Allow the microphone, and click Stop when the meeting ends."
+    )
+    if not consent_confirmed:
+        st.info("Confirm recording consent above to enable the recorder.")
+    tab_audio = tab_recorder(enabled=consent_confirmed, key="meeting_tab_recorder")
+    if tab_audio is not None and consent_confirmed:
+        tab_bytes, tab_mime = tab_audio
+        tab_hash = hashlib.sha256(tab_bytes).hexdigest()
+        if tab_hash != st.session_state.get("processed_tab_audio_hash"):
+            try:
+                extension = "ogg" if "ogg" in tab_mime else "webm"
+                result = process_audio(tab_bytes, f"tab-recording.{extension}")
+                st.session_state["processed_tab_audio_hash"] = tab_hash
+                st.session_state["last_recording_result"] = result
+            except Exception as error:
+                st.error(f"Meeting processing failed: {error}")
+    if st.session_state.get("last_recording_result"):
+        show_processing_result(st.session_state["last_recording_result"])
 else:
     with st.form("meeting_upload", clear_on_submit=False):
         uploaded_audio = st.file_uploader(
