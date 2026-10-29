@@ -53,30 +53,62 @@ def _write_jsonl(path, entries):
     temporary_path.replace(path)
 
 
+def _normalize_level(samples):
+    peak = float(np.abs(samples).max()) if samples.size else 0.0
+    if 0.005 < peak < 0.5:
+        gain = min(0.9 / peak, 10.0)
+        return np.clip(samples * gain, -1.0, 1.0).astype(np.float32)
+    return samples
+
+
+def _is_hallucination(segment):
+    if getattr(segment, "no_speech_prob", 0.0) > 0.6:
+        return True
+    if getattr(segment, "avg_logprob", 0.0) < -1.0:
+        return True
+    return getattr(segment, "compression_ratio", 0.0) > 2.4
+
+
+def _drop_repeated_loops(entries):
+    # Whisper often loops one phrase on noise; keep a phrase at most twice.
+    seen = {}
+    kept = []
+    for entry in entries:
+        key = "".join(ch for ch in entry["text"].casefold() if ch.isalnum())
+        seen[key] = seen.get(key, 0) + 1
+        if seen[key] <= 2:
+            kept.append(entry)
+    return kept
+
+
 def _transcribe_samples(whisper, samples, meeting_time, vad_filter):
     segments, _ = whisper.transcribe(
-        samples,
-        beam_size=3,
+        _normalize_level(samples),
+        beam_size=5,
+        language=os.getenv("WHISPER_LANGUAGE") or None,
         vad_filter=vad_filter,
         condition_on_previous_text=False,
+        no_speech_threshold=0.6,
+        log_prob_threshold=-1.0,
+        compression_ratio_threshold=2.4,
     )
     entries = []
     for segment in segments:
         text = segment.text.strip()
-        if not text:
-        	continue
+        if not text or _is_hallucination(segment):
+            continue
         start = float(segment.start)
         end = float(segment.end)
         entries.append(
-        	{
-        		"timestamp": (meeting_time + timedelta(seconds=start)).isoformat(),
-        		"start": round(start, 3),
-        		"end": round(end, 3),
-        		"speaker": "Unknown",
-        		"text": text,
-        	}
+            {
+                "timestamp": (meeting_time + timedelta(seconds=start)).isoformat(),
+                "start": round(start, 3),
+                "end": round(end, 3),
+                "speaker": "Unknown",
+                "text": text,
+            }
         )
-    return entries
+    return _drop_repeated_loops(entries)
 
 
 def process_uploaded_recording(
