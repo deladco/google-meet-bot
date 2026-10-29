@@ -132,7 +132,22 @@ def process_uploaded_recording(file_bytes, filename, consent_confirmed):
                 )
 
             if not entries:
-                raise ValueError("No speech was detected in the uploaded recording.")
+                duration = samples.size / SAMPLE_RATE
+                peak = float(abs(samples).max())
+                if peak < 0.01:
+                    hint = (
+                        "The audio is silent or nearly silent. Check that the "
+                        "recording captured the meeting's audio (mic or system sound)."
+                    )
+                else:
+                    hint = (
+                        "Audio was present but no words were recognized. Check that "
+                        "the speech is audible and in a supported language."
+                    )
+                raise ValueError(
+                    f"No speech was detected in the uploaded recording "
+                    f"({duration:.1f}s, peak level {peak:.3f}). {hint}"
+                )
 
             _write_jsonl(transcript_path, entries)
             history.index_file(session_id, "transcript", transcript_path)
