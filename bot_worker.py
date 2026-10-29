@@ -186,8 +186,16 @@ def join(page, url, name):
 
 
 def in_meeting(page):
-    """True once the bot is admitted (a leave/hang-up control is visible)."""
-    for label in ("Leave call", "Leave", "Hang up", "End"):
+    """True once the bot is admitted: a leave control is visible and the lobby/join screens are gone."""
+    if in_lobby(page):
+        return False
+    for label in ("Ask to join", "Join now", "Join"):
+        try:
+            if page.get_by_role("button", name=label, exact=True).first.is_visible(timeout=200):
+                return False
+        except Exception:
+            continue
+    for label in ("Leave call", "Hang up"):
         try:
             if page.get_by_role("button", name=label).first.is_visible(timeout=300):
                 return True
@@ -296,10 +304,16 @@ def record_meeting(db, job, wav_path):
                 pass
 
             recorder.start()
+            print("Admitted - recording started", flush=True)
             set_job(db, job["id"], status="recording", message=None)
             deadline = time.time() + MAX_MINUTES * 60
+            started = time.time()
             while time.time() < deadline:
-                if job_status(db, job["id"]) == "stop_requested" or meeting_over(page):
+                if job_status(db, job["id"]) == "stop_requested":
+                    print("Stop requested from the app after %ds" % (time.time() - started), flush=True)
+                    break
+                if time.time() - started > 20 and meeting_over(page):
+                    print("Meeting ended after %ds: %s" % (time.time() - started, page_text(page)[:120].replace("\n", " | ")), flush=True)
                     break
                 time.sleep(3)
             return True
