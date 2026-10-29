@@ -79,7 +79,9 @@ def _transcribe_samples(whisper, samples, meeting_time, vad_filter):
     return entries
 
 
-def process_uploaded_recording(file_bytes, filename, consent_confirmed):
+def process_uploaded_recording(
+    file_bytes, filename, consent_confirmed, owner_id=None, owner_email=None
+):
     if not consent_confirmed:
         raise ValueError("Confirm participant consent before processing a recording.")
     if not file_bytes:
@@ -105,6 +107,8 @@ def process_uploaded_recording(file_bytes, filename, consent_confirmed):
         notes_path=notes_path,
         minutes_path=minutes_path,
         status="processing",
+        owner_id=owner_id,
+        owner_email=owner_email,
     )
 
     try:

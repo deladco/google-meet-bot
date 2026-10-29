@@ -55,7 +55,9 @@ class MeetingHistory:
                     minutes_path TEXT,
                     minutes_json TEXT,
                     status TEXT NOT NULL,
-                    error TEXT
+                    error TEXT,
+                    owner_id TEXT,
+                    owner_email TEXT
                 )
                 """
             )
@@ -67,6 +69,10 @@ class MeetingHistory:
                 connection.execute("ALTER TABLE meetings ADD COLUMN minutes_path TEXT")
             if "minutes_json" not in columns:
                 connection.execute("ALTER TABLE meetings ADD COLUMN minutes_json TEXT")
+            if "owner_id" not in columns:
+                connection.execute("ALTER TABLE meetings ADD COLUMN owner_id TEXT")
+            if "owner_email" not in columns:
+                connection.execute("ALTER TABLE meetings ADD COLUMN owner_email TEXT")
             connection.execute(
                 """
                 CREATE VIRTUAL TABLE IF NOT EXISTS meeting_search
@@ -82,14 +88,16 @@ class MeetingHistory:
         notes_path=None,
         status="starting",
         minutes_path=None,
+        owner_id=None,
+        owner_email=None,
     ):
         with self._connection() as connection:
             connection.execute(
                 """
                 INSERT INTO meetings (
                     meeting_id, timestamp, transcript_path, notes_path,
-                    minutes_path, status
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                    minutes_path, status, owner_id, owner_email
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(meeting_id) DO UPDATE SET
                     timestamp = excluded.timestamp,
                     transcript_path = excluded.transcript_path,
@@ -105,6 +113,8 @@ class MeetingHistory:
                     str(Path(notes_path).resolve()) if notes_path else None,
                     str(Path(minutes_path).resolve()) if minutes_path else None,
                     str(status),
+                    owner_id,
+                    owner_email,
                 ),
             )
 
@@ -175,11 +185,13 @@ class MeetingHistory:
             useful_terms = terms
         return " OR ".join(f'"{term.replace(chr(34), chr(34) * 2)}"' for term in useful_terms)
 
-    def search(self, query, limit=10):
+    def search(self, query, limit=10, owner_id=None):
         match = self._fts_query(query)
+        owner_filter = "AND meetings.owner_id = ?" if owner_id else ""
+        params = [match] + ([owner_id] if owner_id else []) + [max(1, int(limit))]
         with self._connection() as connection:
             rows = connection.execute(
-                """
+                f"""
                 SELECT
                     meetings.meeting_id,
                     meetings.timestamp,
@@ -191,30 +203,34 @@ class MeetingHistory:
                     snippet(meeting_search, 2, '[', ']', ' … ', 24) AS excerpt
                 FROM meeting_search
                 JOIN meetings USING (meeting_id)
-                WHERE meeting_search MATCH ?
+                WHERE meeting_search MATCH ? {owner_filter}
                 ORDER BY bm25(meeting_search)
                 LIMIT ?
                 """,
-                (match, max(1, int(limit))),
+                params,
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def list_meetings(self, limit=20):
+    def list_meetings(self, limit=20, owner_id=None):
+        owner_filter = "WHERE owner_id = ?" if owner_id else ""
+        params = ([owner_id] if owner_id else []) + [max(1, int(limit))]
         with self._connection() as connection:
             rows = connection.execute(
-                """
+                f"""
                 SELECT meeting_id, timestamp, transcript_path, notes_path,
-                    minutes_path, minutes_json, status, error
+                    minutes_path, minutes_json, status, error,
+                    owner_id, owner_email
                 FROM meetings
+                {owner_filter}
                 ORDER BY timestamp DESC
                 LIMIT ?
                 """,
-                (max(1, int(limit)),),
+                params,
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def answer(self, question, limit=5, model=None):
-        matches = self.search(question, limit=limit)
+    def answer(self, question, limit=5, model=None, owner_id=None):
+        matches = self.search(question, limit=limit, owner_id=owner_id)
         if not matches:
             return "No matching meeting history found."
 

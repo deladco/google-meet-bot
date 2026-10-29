@@ -175,12 +175,28 @@ consent_confirmed = st.checkbox(
 )
 
 
+def current_viewer():
+    """Returns (owner_id, owner_email, can_see_all) for the signed-in Supabase user."""
+    if not auth_db.is_configured():
+        return None, None, True
+    email = st.session_state.get("supabase_user")
+    admin_email = (get_setting("ADMIN_EMAIL") or "").strip().casefold()
+    is_admin = bool(admin_email) and (email or "").casefold() == admin_email
+    return st.session_state.get("user_id"), email, is_admin
+
+
+viewer_id, viewer_email, viewer_sees_all = current_viewer()
+scope_owner_id = None if viewer_sees_all else viewer_id
+
+
 def process_audio(audio_bytes, filename):
     with st.spinner("Transcribing, diarizing, and generating meeting minutes..."):
         return process_uploaded_recording(
             audio_bytes,
             filename,
             consent_confirmed=consent_confirmed,
+            owner_id=viewer_id,
+            owner_email=viewer_email,
         )
 
 
@@ -298,7 +314,7 @@ else:
 st.divider()
 
 history = MeetingHistory()
-meetings = history.list_meetings(limit=500)
+meetings = history.list_meetings(limit=500, owner_id=scope_owner_id)
 statuses = sorted({meeting["status"] for meeting in meetings})
 
 with st.sidebar:
@@ -368,6 +384,11 @@ with list_tab:
                 "Meeting ID": meeting["meeting_id"],
                 "Status": display_status(meeting),
                 "Notes": "Available" if meeting["notes_path"] else "Pending",
+                **(
+                    {"Recorded by": meeting["owner_email"] or "Unknown (before accounts)"}
+                    if viewer_sees_all and auth_db.is_configured()
+                    else {}
+                ),
             }
             for meeting in filtered_meetings
         ]
@@ -384,6 +405,10 @@ with list_tab:
 
         left, right = st.columns(2)
         left.markdown(f"**Timestamp**  \n{selected['timestamp']}")
+        if viewer_sees_all and auth_db.is_configured():
+            left.caption(
+                f"Recorded by: {selected['owner_email'] or 'Unknown (before accounts)'}"
+            )
         selected_too_short = transcript_is_too_short(selected)
         right.markdown(f"**Status**  \n{display_status(selected)}")
         st.caption(f"Transcript: {selected['transcript_path']}")
@@ -469,7 +494,7 @@ with search_tab:
     query = st.text_input("Search transcripts, notes, owners, or deadlines")
     if st.button("Search", key="search_button", disabled=not query.strip()):
         try:
-            results = history.search(query, limit=30)
+            results = history.search(query, limit=30, owner_id=scope_owner_id)
         except Exception as error:
             st.error(f"Search failed: {error}")
         else:
@@ -491,7 +516,7 @@ with ask_tab:
     if st.button("Ask", key="ask_button", disabled=not question.strip()):
         try:
             with st.spinner("Searching meeting history and asking Ollama..."):
-                answer = history.answer(question, limit=5)
+                answer = history.answer(question, limit=5, owner_id=scope_owner_id)
         except Exception as error:
             st.error(f"Could not answer from local history: {error}")
         else:
