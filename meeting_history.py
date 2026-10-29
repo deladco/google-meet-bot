@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from remote_config import get_ollama_client, get_setting
+from remote_config import get_ollama_client, get_ollama_model, get_setting
 
 PROJECT_DIR = Path(__file__).resolve().parent
 DEFAULT_DB_PATH = Path(
@@ -213,7 +213,7 @@ class MeetingHistory:
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def answer(self, question, limit=5, model="llama3.2:3b"):
+    def answer(self, question, limit=5, model=None):
         matches = self.search(question, limit=limit)
         if not matches:
             return "No matching meeting history found."
@@ -228,7 +228,7 @@ class MeetingHistory:
             )
 
         response = get_ollama_client().chat(
-            model=model,
+            model=model or get_ollama_model(),
             messages=[
                 {
                     "role": "system",

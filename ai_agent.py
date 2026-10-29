@@ -3,12 +3,12 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from remote_config import get_ollama_client
+from remote_config import get_ollama_client, get_ollama_model
 
 PROJECT_DIR = Path(__file__).resolve().parent
 OUTPUT = PROJECT_DIR / "output"
 DEFAULT_TRANSCRIPT_FILE = OUTPUT / "transcript.jsonl"
-MODEL = "llama3.2:3b"
+MODEL = get_ollama_model()
 MIN_TRANSCRIPT_WORDS = 20
 MINUTES_SCHEMA = {
 	"type": "object",
