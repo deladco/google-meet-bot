@@ -91,11 +91,34 @@ def upsert_meeting(client, row):
 
 
 def list_meetings(client, limit=200):
-    return (
-        client.table(MEETINGS_TABLE)
-        .select("meeting_id,recorded_at,status,transcript,notes,minutes")
-        .order("recorded_at", desc=True)
-        .limit(limit)
-        .execute()
-        .data
-    )
+    columns = "meeting_id,recorded_at,status,transcript,notes,minutes"
+    try:
+        query = client.table(MEETINGS_TABLE).select(columns + ",owner_email")
+        return query.order("recorded_at", desc=True).limit(limit).execute().data
+    except Exception:
+        # owner_email column not added yet (supabase_migration_persist.sql)
+        query = client.table(MEETINGS_TABLE).select(columns)
+        return query.order("recorded_at", desc=True).limit(limit).execute().data
+
+
+def save_meeting_from_history(client, meeting, owner_email=None):
+    """Persist one local history row (and its files) to Supabase so it survives redeploys."""
+    import json
+    from pathlib import Path
+
+    def read(path):
+        path = Path(path) if path else None
+        return path.read_text(encoding="utf-8") if path and path.is_file() else None
+
+    row = {
+        "meeting_id": meeting["meeting_id"],
+        "recorded_at": meeting["timestamp"],
+        "status": meeting["status"],
+        "transcript": read(meeting["transcript_path"]) or "",
+        "notes": read(meeting["notes_path"]),
+        "minutes": json.loads(meeting["minutes_json"]) if meeting["minutes_json"] else None,
+    }
+    try:
+        return upsert_meeting(client, {**row, "owner_email": owner_email})
+    except Exception:
+        return upsert_meeting(client, row)

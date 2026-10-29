@@ -192,7 +192,10 @@ if auth_db.is_configured():
     with st.sidebar:
         total_on_server = len(MeetingHistory().list_meetings(limit=100000))
         if viewer_sees_all:
-            st.caption(f"Admin view: all users' meetings ({total_on_server} on server)")
+            st.caption(
+                f"Admin view: all users' meetings. Saved copies are in the Cloud tab "
+                f"({total_on_server} on this server's temporary disk)."
+            )
         else:
             st.caption(
                 f"Showing only your meetings. {total_on_server} on server in total. "
@@ -203,13 +206,37 @@ if auth_db.is_configured():
 
 def process_audio(audio_bytes, filename):
     with st.spinner("Transcribing, diarizing, and generating meeting minutes..."):
-        return process_uploaded_recording(
+        result = process_uploaded_recording(
             audio_bytes,
             filename,
             consent_confirmed=consent_confirmed,
             owner_id=viewer_id,
             owner_email=viewer_email,
         )
+    save_to_cloud(result)
+    return result
+
+
+def save_to_cloud(result):
+    """Copy the finished meeting to Supabase; the server disk is wiped on redeploy."""
+    if not (auth_db.is_configured() and st.session_state.get("supabase_user")):
+        return
+    try:
+        saved = next(
+            (
+                meeting
+                for meeting in MeetingHistory().list_meetings(limit=50)
+                if meeting["meeting_id"] == result.get("meeting_id")
+            ),
+            None,
+        )
+        if saved:
+            auth_db.save_meeting_from_history(
+                auth_db.client_for_user(), saved, owner_email=viewer_email
+            )
+            result["saved_to_cloud"] = True
+    except Exception as error:
+        st.warning(f"Could not save this meeting to the cloud: {error}")
 
 
 def show_saved_transcript(result):
@@ -355,7 +382,10 @@ with cloud_tab:
     if not st.session_state.get("supabase_user"):
         st.info("Sign in with Supabase to see meetings synced from your computer.")
     else:
-        st.caption("Run `python sync_meeting.py` on your computer to upload new meetings.")
+        st.caption(
+            "New recordings are saved here automatically and survive redeploys. "
+            "Run `python sync_meeting.py` to upload older local meetings."
+        )
         try:
             cloud_meetings = auth_db.list_meetings(auth_db.client_for_user())
         except PermissionError:
@@ -367,7 +397,8 @@ with cloud_tab:
         if not cloud_meetings:
             st.info("No synced meetings yet.")
         for item in cloud_meetings:
-            with st.expander(f"{item['recorded_at']} · {item['meeting_id']} · {item['status']}"):
+            by = f" · {item['owner_email']}" if viewer_sees_all and item.get("owner_email") else ""
+            with st.expander(f"{item['recorded_at']} · {item['meeting_id']} · {item['status']}{by}"):
                 if item.get("notes"):
                     st.markdown(item["notes"])
                     st.download_button(
