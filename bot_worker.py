@@ -176,10 +176,13 @@ def join(page, url, name):
     if platform == "zoom":
         _click_first(page, ["Join Audio by Computer", "Join"], 3000)
     if not _click_first(page, ["Ask to join", "Join now", "Join"], 4000):
-        raise RuntimeError(
-            "Could not find the join button. The meeting may require a signed-in account "
-            "or the host blocks anonymous guests."
-        )
+        if HEADLESS:
+            raise RuntimeError(
+                "Could not find the join button. The meeting may require a signed-in account "
+                "or the host blocks anonymous guests."
+            )
+        return False
+    return True
 
 
 def in_meeting(page):
@@ -260,9 +263,15 @@ def record_meeting(db, job, wav_path):
         )
         page = context.new_page()
         try:
-            join(page, job["meeting_url"], job["bot_name"])
+            clicked = join(page, job["meeting_url"], job["bot_name"])
             lobby_deadline = time.time() + LOBBY_MINUTES * 60
             last_message = None
+            if not clicked:
+                set_job(
+                    db, job["id"],
+                    message="Could not press Join automatically - sign in / join manually in the bot's browser window",
+                )
+                last_message = "manual"
             while not in_meeting(page):
                 reason = denied_reason(page)
                 if reason:
@@ -276,10 +285,15 @@ def record_meeting(db, job, wav_path):
                     if in_lobby(page)
                     else "Opening the meeting page"
                 )
-                if message != last_message:
+                if last_message != "manual" and message != last_message:
                     set_job(db, job["id"], message=message)
                     last_message = message
                 time.sleep(3)
+
+            try:
+                context.storage_state(path=str(STATE_FILE))  # keep the bot's login for next time
+            except Exception:
+                pass
 
             recorder.start()
             set_job(db, job["id"], status="recording", message=None)
