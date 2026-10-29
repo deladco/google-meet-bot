@@ -17,6 +17,7 @@ from ai_agent import (
     render_markdown,
 )
 from meeting_history import MeetingHistory
+from remote_config import get_setting
 
 PROJECT_DIR = Path(__file__).resolve().parent
 load_dotenv(dotenv_path=PROJECT_DIR / ".env")
@@ -121,7 +122,7 @@ def process_uploaded_recording(file_bytes, filename, consent_confirmed):
             history.update_status(session_id, "transcribed")
 
             diarization_status = "unavailable"
-            hf_token = os.getenv("HF_TOKEN")
+            hf_token = get_setting("HF_TOKEN")
             if hf_token:
                 try:
                     from diarization import diarize_transcript

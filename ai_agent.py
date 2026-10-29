@@ -1,11 +1,9 @@
 import argparse
 import json
-import os
 from datetime import datetime
-from functools import lru_cache
 from pathlib import Path
 
-from ollama import Client
+from remote_config import get_ollama_client
 
 PROJECT_DIR = Path(__file__).resolve().parent
 OUTPUT = PROJECT_DIR / "output"
@@ -96,11 +94,6 @@ MINUTES_SCHEMA = {
 }
 
 
-@lru_cache(maxsize=1)
-def _ollama_client():
-	return Client(host=os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434"))
-
-
 def load_transcript(path=DEFAULT_TRANSCRIPT_FILE):
 	if not path.exists():
 		raise FileNotFoundError(f"No transcript found at {path}")
@@ -162,7 +155,7 @@ def analyze_meeting(transcript_path=DEFAULT_TRANSCRIPT_FILE):
 			"record more audio before analyzing."
 		)
 
-	response = _ollama_client().chat(
+	response = get_ollama_client().chat(
 		model=MODEL,
 		format=MINUTES_SCHEMA,
 		options={"temperature": 0},

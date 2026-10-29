@@ -29,6 +29,20 @@ Upload a consented recording (`wav`, `mp3`, `m4a`, `flac`, `ogg`, `mp4`, or `web
 
 The Docker Compose volumes persist the meeting database, generated transcripts/notes, Hugging Face model cache, and Ollama model cache across container restarts. The uploaded original audio is not retained by the application.
 
+## Streamlit Community Cloud with hosted Ollama
+
+If hosting only the UI on Streamlit Community Cloud, configure these values under **Manage app → Settings → Secrets**:
+
+```toml
+OLLAMA_HOST = "https://ollama.example.com"
+OLLAMA_API_KEY = "your-proxy-bearer-token"
+HF_TOKEN = "your-hugging-face-token"
+```
+
+`OLLAMA_HOST` must be a reachable HTTPS endpoint backed by an authenticated reverse proxy or private network. Configure the proxy to forward Ollama API requests to the private Ollama service; do not expose port `11434` directly to the public internet. The app sends `OLLAMA_API_KEY` as a bearer token when present.
+
+Streamlit Community Cloud storage is ephemeral, so its local SQLite database and generated artifacts are not durable across restarts. Use the single-host Docker Compose deployment above for persistent local storage, or replace SQLite and local files with managed database and object-storage services before relying on Cloud for meeting history.
+
 ## Meeting history
 
 The dashboard provides meeting details, FTS5 keyword search, and Ollama-backed questions over matched transcript and notes. The CLI is also available inside the app container or local environment:
