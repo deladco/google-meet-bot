@@ -3,20 +3,33 @@ from supabase import Client, create_client as _create_client
 
 from remote_config import get_setting
 
-MEETINGS_TABLE = "meetings"
+MEETINGS_TABLE = "synced_meetings"
 SESSION_KEYS = ("access_token", "refresh_token", "user_id", "supabase_user")
 
 
+def _first(*names):
+    return next((value for name in names if (value := get_setting(name))), None)
+
+
+def _url():
+    return _first("SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL")
+
+
 def _key():
-    return get_setting("SUPABASE_KEY") or get_setting("SUPABASE_ANON_KEY")
+    return _first(
+        "SUPABASE_KEY",
+        "SUPABASE_ANON_KEY",
+        "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
+        "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+    )
 
 
 def is_configured():
-    return bool(get_setting("SUPABASE_URL") and _key())
+    return bool(_url() and _key())
 
 
 def new_client() -> Client:
-    return _create_client(get_setting("SUPABASE_URL"), _key())
+    return _create_client(_url(), _key())
 
 
 create_client = new_client
