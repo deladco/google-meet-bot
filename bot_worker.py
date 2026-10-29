@@ -335,6 +335,9 @@ def run_job(db, job):
             return
         if not wav_path.exists() or wav_path.stat().st_size < 10_000:
             raise RuntimeError("No audio was captured from the meeting.")
+        keep = PROJECT_DIR / "output" / "bot_last_recording.wav"
+        keep.parent.mkdir(exist_ok=True)
+        shutil.copyfile(wav_path, keep)  # listen to this if a meeting comes back empty
 
         set_job(db, job["id"], status="processing")
         result = process_uploaded_recording(
