@@ -11,12 +11,60 @@ PROJECT_DIR = Path(__file__).resolve().parent
 load_dotenv(dotenv_path=PROJECT_DIR / ".env")
 
 from meeting_history import MeetingHistory
+from remote_config import (
+    CLOUD_OLLAMA_HOST,
+    LOCAL_OLLAMA_HOST,
+    get_ollama_client,
+    get_ollama_host,
+    get_setting,
+)
 from remote_workflow import process_uploaded_recording
 
 st.set_page_config(page_title="AI Assistant", layout="wide")
 st.title("AI Assistant")
 st.caption("Created by Daryna Ladanovska · Version 1.0")
 st.subheader("Meeting history")
+
+
+def ollama_target_label(host):
+    if host.rstrip("/") == CLOUD_OLLAMA_HOST.rstrip("/"):
+        return "Ollama Cloud"
+    if host.rstrip("/") == LOCAL_OLLAMA_HOST.rstrip("/"):
+        return "Local Ollama"
+    return "Custom Ollama endpoint"
+
+
+with st.sidebar:
+    st.subheader("Ollama connection")
+    ollama_host = get_ollama_host()
+    api_key_configured = bool(get_setting("OLLAMA_API_KEY"))
+    st.caption(f"Endpoint: {ollama_target_label(ollama_host)}")
+    st.caption(f"API key: {'configured' if api_key_configured else 'missing'}")
+
+    if st.button(
+        "Test Ollama connection",
+        disabled=not api_key_configured,
+        key="test_ollama_connection",
+    ):
+        try:
+            with st.spinner("Checking Ollama API access..."):
+                get_ollama_client().list()
+        except Exception as error:
+            status_code = getattr(error, "status_code", None)
+            if status_code == 401:
+                message = "Ollama rejected the API key. Check OLLAMA_API_KEY in app secrets."
+            elif status_code == 402:
+                message = "Ollama reports that this account needs usage credits."
+            elif status_code == 429:
+                message = "Ollama rate limit reached. Try again later."
+            else:
+                message = (
+                    f"Could not reach {ollama_target_label(ollama_host)} "
+                    f"({type(error).__name__}). Check OLLAMA_HOST and network access."
+                )
+            st.error(message)
+        else:
+            st.success("Connected to Ollama API.")
 
 
 def transcript_is_too_short(meeting):
