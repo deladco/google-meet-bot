@@ -1,5 +1,6 @@
 import argparse
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -148,6 +149,14 @@ def _parse_minutes_response(response):
 			"Ollama returned an empty response while generating meeting notes. "
 			"Please try again."
 		)
+
+	fenced_json = re.search(
+		r"```(?:json)?\s*(.*?)\s*```",
+		content,
+		flags=re.IGNORECASE | re.DOTALL,
+	)
+	if fenced_json:
+		content = fenced_json.group(1)
 
 	try:
 		minutes = json.loads(content)
