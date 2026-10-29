@@ -148,26 +148,29 @@ if audio_source == "Browser microphone":
         "Use the recorder’s Start/Stop controls. This captures your browser microphone, "
         "not Meet tab or system audio."
     )
-    recorded_audio = st.audio_input(
-        "Start meeting recording",
-        sample_rate=16000,
-        disabled=not consent_confirmed,
-        key="meeting_microphone_recording",
-    )
-    if recorded_audio is None:
+    if not consent_confirmed:
+        st.info("Confirm recording consent above to enable the microphone recorder.")
         st.session_state.pop("processed_browser_audio_hash", None)
     else:
-        audio_bytes = recorded_audio.getvalue()
-        audio_hash = hashlib.sha256(audio_bytes).hexdigest()
-        if audio_hash != st.session_state.get("processed_browser_audio_hash"):
-            try:
-                result = process_audio(audio_bytes, "browser-recording.wav")
-                st.session_state["processed_browser_audio_hash"] = audio_hash
-                st.session_state["last_recording_result"] = result
-            except Exception as error:
-                st.error(f"Meeting processing failed: {error}")
-        if st.session_state.get("last_recording_result"):
-            show_processing_result(st.session_state["last_recording_result"])
+        recorded_audio = st.audio_input(
+            "Record from microphone",
+            sample_rate=16000,
+            key="meeting_microphone_recording",
+        )
+        if recorded_audio is None:
+            st.session_state.pop("processed_browser_audio_hash", None)
+        else:
+            audio_bytes = recorded_audio.getvalue()
+            audio_hash = hashlib.sha256(audio_bytes).hexdigest()
+            if audio_hash != st.session_state.get("processed_browser_audio_hash"):
+                try:
+                    result = process_audio(audio_bytes, "browser-recording.wav")
+                    st.session_state["processed_browser_audio_hash"] = audio_hash
+                    st.session_state["last_recording_result"] = result
+                except Exception as error:
+                    st.error(f"Meeting processing failed: {error}")
+            if st.session_state.get("last_recording_result"):
+                show_processing_result(st.session_state["last_recording_result"])
 else:
     with st.form("meeting_upload", clear_on_submit=False):
         uploaded_audio = st.file_uploader(
