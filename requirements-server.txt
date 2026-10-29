@@ -6,3 +6,4 @@ scipy>=1.18,<2
 pyannote.audio>=4,<5
 ollama>=0.6,<1
 python-dotenv>=1.2,<2
+supabase>=2,<3

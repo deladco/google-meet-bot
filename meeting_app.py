@@ -7,6 +7,7 @@ from pathlib import Path
 import streamlit as st
 from dotenv import load_dotenv
 
+import auth_db
 from ai_agent import MIN_TRANSCRIPT_WORDS, load_transcript
 PROJECT_DIR = Path(__file__).resolve().parent
 load_dotenv(dotenv_path=PROJECT_DIR / ".env")
@@ -53,7 +54,44 @@ def require_password():
     st.stop()
 
 
-require_password()
+def require_login():
+    if st.session_state.get("supabase_user"):
+        return
+    st.title("AI Assistant")
+    client = st.session_state.get("supabase_client") or auth_db.create_client()
+    st.session_state["supabase_client"] = client
+    sign_in_tab, sign_up_tab = st.tabs(["Sign in", "Create account"])
+    with sign_in_tab, st.form("supabase_sign_in"):
+        email = st.text_input("Email")
+        password = st.text_input("Password", type="password")
+        if st.form_submit_button("Sign in", type="primary"):
+            try:
+                user = auth_db.sign_in(client, email, password)
+            except Exception as error:
+                st.error(f"Sign in failed: {error}")
+            else:
+                st.session_state["supabase_user"] = user.email
+                st.rerun()
+    with sign_up_tab, st.form("supabase_sign_up"):
+        new_email = st.text_input("Email", key="signup_email")
+        new_password = st.text_input("Password (min 6 characters)", type="password", key="signup_password")
+        if st.form_submit_button("Create account"):
+            try:
+                _, signed_in = auth_db.sign_up(client, new_email, new_password)
+            except Exception as error:
+                st.error(f"Sign up failed: {error}")
+            else:
+                if signed_in:
+                    st.session_state["supabase_user"] = new_email.strip()
+                    st.rerun()
+                st.success("Account created. Confirm the email we sent, then sign in.")
+    st.stop()
+
+
+if auth_db.is_configured():
+    require_login()
+else:
+    require_password()
 st.title("AI Assistant")
 st.caption("Created by Daryna Ladanovska · Version 1.0")
 st.subheader("Meeting history")
@@ -68,8 +106,13 @@ def ollama_target_label(host):
 
 
 with st.sidebar:
-    if st.button("Lock app"):
-        st.session_state["authenticated"] = False
+    if st.session_state.get("supabase_user"):
+        st.caption(f"Signed in as {st.session_state['supabase_user']}")
+    if st.button("Sign out" if st.session_state.get("supabase_user") else "Lock app"):
+        if st.session_state.get("supabase_client"):
+            auth_db.sign_out(st.session_state["supabase_client"])
+        for key in ("authenticated", "supabase_user", "supabase_client"):
+            st.session_state.pop(key, None)
         st.rerun()
     st.subheader("Ollama connection")
     ollama_host = get_ollama_host()
@@ -280,7 +323,42 @@ metric_columns[0].metric("Meetings", len(meetings))
 metric_columns[1].metric("Completed", completed_count)
 metric_columns[2].metric("Needs attention", len(meetings) - completed_count)
 
-list_tab, search_tab, ask_tab = st.tabs(["Meetings", "Search", "Ask"])
+list_tab, search_tab, ask_tab, cloud_tab = st.tabs(
+    ["Meetings", "Search", "Ask", "Cloud"]
+)
+
+with cloud_tab:
+    cloud_client = st.session_state.get("supabase_client")
+    if not st.session_state.get("supabase_user") or cloud_client is None:
+        st.info("Sign in with Supabase to see meetings synced from your computer.")
+    else:
+        st.caption("Run `python sync_meeting.py` on your computer to upload new meetings.")
+        try:
+            cloud_meetings = auth_db.list_meetings(cloud_client)
+        except Exception as error:
+            st.error(f"Could not load cloud meetings: {error}")
+            cloud_meetings = []
+        if not cloud_meetings:
+            st.info("No synced meetings yet.")
+        for item in cloud_meetings:
+            with st.expander(f"{item['recorded_at']} · {item['meeting_id']} · {item['status']}"):
+                if item.get("notes"):
+                    st.markdown(item["notes"])
+                    st.download_button(
+                        "Download notes (.md)",
+                        data=item["notes"],
+                        file_name=f"meeting_notes_{item['meeting_id']}.md",
+                        mime="text/markdown",
+                        key=f"cloud_notes_{item['meeting_id']}",
+                    )
+                if item.get("transcript"):
+                    st.download_button(
+                        "Download transcript (.jsonl)",
+                        data=item["transcript"],
+                        file_name=f"transcript_{item['meeting_id']}.jsonl",
+                        mime="application/jsonl",
+                        key=f"cloud_transcript_{item['meeting_id']}",
+                    )
 
 with list_tab:
     if not filtered_meetings:
