@@ -53,6 +53,32 @@ def _write_jsonl(path, entries):
     temporary_path.replace(path)
 
 
+def _transcribe_samples(whisper, samples, meeting_time, vad_filter):
+    segments, _ = whisper.transcribe(
+        samples,
+        beam_size=3,
+        vad_filter=vad_filter,
+        condition_on_previous_text=False,
+    )
+    entries = []
+    for segment in segments:
+        text = segment.text.strip()
+        if not text:
+        	continue
+        start = float(segment.start)
+        end = float(segment.end)
+        entries.append(
+        	{
+        		"timestamp": (meeting_time + timedelta(seconds=start)).isoformat(),
+        		"start": round(start, 3),
+        		"end": round(end, 3),
+        		"speaker": "Unknown",
+        		"text": text,
+        	}
+        )
+    return entries
+
+
 def process_uploaded_recording(file_bytes, filename, consent_confirmed):
     if not consent_confirmed:
         raise ValueError("Confirm participant consent before processing a recording.")
@@ -91,27 +117,18 @@ def process_uploaded_recording(file_bytes, filename, consent_confirmed):
                 raise ValueError("No decodable audio was found in the upload.")
 
             whisper = _whisper_model()
-            segments, info = whisper.transcribe(
+            entries = _transcribe_samples(
+                whisper,
                 samples,
-                beam_size=3,
+                meeting_time,
                 vad_filter=True,
-                condition_on_previous_text=False,
             )
-            entries = []
-            for segment in segments:
-                text = segment.text.strip()
-                if not text:
-                    continue
-                start = float(segment.start)
-                end = float(segment.end)
-                entries.append(
-                    {
-                        "timestamp": (meeting_time + timedelta(seconds=start)).isoformat(),
-                        "start": round(start, 3),
-                        "end": round(end, 3),
-                        "speaker": "Unknown",
-                        "text": text,
-                    }
+            if not entries:
+                entries = _transcribe_samples(
+                    whisper,
+                    samples,
+                    meeting_time,
+                    vad_filter=False,
                 )
 
             if not entries:
