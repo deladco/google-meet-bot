@@ -188,6 +188,18 @@ def current_viewer():
 viewer_id, viewer_email, viewer_sees_all = current_viewer()
 scope_owner_id = None if viewer_sees_all else viewer_id
 
+if auth_db.is_configured():
+    with st.sidebar:
+        total_on_server = len(MeetingHistory().list_meetings(limit=100000))
+        if viewer_sees_all:
+            st.caption(f"Admin view: all users' meetings ({total_on_server} on server)")
+        else:
+            st.caption(
+                f"Showing only your meetings. {total_on_server} on server in total. "
+                "If you are the admin, set ADMIN_EMAIL to your sign-in email "
+                f"(signed in as {viewer_email})."
+            )
+
 
 def process_audio(audio_bytes, filename):
     with st.spinner("Transcribing, diarizing, and generating meeting minutes..."):
