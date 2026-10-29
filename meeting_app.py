@@ -285,6 +285,39 @@ with list_tab:
             else:
                 st.warning(selected["error"])
 
+        selected_transcript_path = Path(selected["transcript_path"])
+        if selected_transcript_path.is_file():
+            raw_transcript = selected_transcript_path.read_text(encoding="utf-8")
+            if raw_transcript.strip():
+                try:
+                    transcript_lines = [
+                        f"[{entry.get('timestamp', '')}] "
+                        f"{entry.get('speaker', 'Unknown')}: {entry.get('text', '')}"
+                        for entry in load_transcript(selected_transcript_path)
+                    ]
+                    readable_transcript = "\n".join(transcript_lines)
+                except Exception:
+                    readable_transcript = raw_transcript
+                transcript_columns = st.columns(2)
+                transcript_columns[0].download_button(
+                    "Download transcript (.txt)",
+                    data=readable_transcript,
+                    file_name=f"transcript_{selected['meeting_id']}.txt",
+                    mime="text/plain",
+                    key=f"download_transcript_txt_{selected['meeting_id']}",
+                )
+                transcript_columns[1].download_button(
+                    "Download transcript (.jsonl)",
+                    data=raw_transcript,
+                    file_name=f"transcript_{selected['meeting_id']}.jsonl",
+                    mime="application/jsonl",
+                    key=f"download_transcript_jsonl_{selected['meeting_id']}",
+                )
+            else:
+                st.caption("No speech was captured, so the transcript is empty.")
+        else:
+            st.caption("Transcript file is no longer available on the server.")
+
         if selected["minutes_json"]:
             minutes = json.loads(selected["minutes_json"])
             st.subheader("Action items")
