@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -12,9 +13,10 @@ load_dotenv(dotenv_path=PROJECT_DIR / ".env")
 from meeting_history import MeetingHistory
 from remote_workflow import process_uploaded_recording
 
-st.set_page_config(page_title="Meeting History", layout="wide")
-st.title("Meeting History")
-st.caption("Local transcripts, notes, decisions, action items, and source references")
+st.set_page_config(page_title="AI Assistant", layout="wide")
+st.title("AI Assistant")
+st.caption("Created by Daryna Ladanovska · Version 1.0")
+st.subheader("Meeting history")
 
 
 def transcript_is_too_short(meeting):
@@ -38,46 +40,89 @@ def display_status(meeting):
     return meeting["status"].replace("_", " ").capitalize()
 
 
-st.subheader("Process a meeting recording")
-st.caption("Upload a meeting recording. Processing runs on this server; the original audio is discarded afterward.")
+st.subheader("Record or process a meeting")
+audio_source = st.segmented_control(
+    "Recording source",
+    options=["Browser microphone", "Upload file"],
+    default="Browser microphone",
+    key="audio_source",
+)
+consent_confirmed = st.checkbox(
+    "I have consent to record and transcribe this meeting."
+)
 
-with st.form("meeting_upload", clear_on_submit=False):
-    uploaded_audio = st.file_uploader(
-        "Meeting audio or video",
-        type=["wav", "mp3", "m4a", "flac", "ogg", "mp4", "webm"],
-        max_upload_size=512,
-        help="Maximum 512 MB. The uploaded file is processed temporarily and is not retained.",
-    )
-    consent_confirmed = st.checkbox(
-        "I have consent to record and transcribe this meeting."
-    )
-    process_recording = st.form_submit_button(
-        "Transcribe and analyze",
-        type="primary",
-        disabled=uploaded_audio is None or not consent_confirmed,
-        width="stretch",
-    )
 
-if process_recording and uploaded_audio is not None:
-    try:
-        with st.spinner("Transcribing, diarizing, and generating meeting minutes..."):
-            result = process_uploaded_recording(
-                uploaded_audio.getvalue(),
-                uploaded_audio.name,
-                consent_confirmed=True,
-            )
-        if result["status"] == "completed":
-            st.success(f"Meeting processed: {result['meeting_id']}")
-            st.caption(
-                f"{result['action_item_count']} action items · "
-                f"Speaker diarization: {result['diarization_status']}"
-            )
-        elif result["status"] == "too_short_to_analyze":
-            st.warning(result["error"], title="Meeting too short to analyze")
-        else:
-            st.warning(f"Processing finished with status: {result['status']}")
-    except Exception as error:
-        st.error(f"Meeting processing failed: {error}")
+def process_audio(audio_bytes, filename):
+    with st.spinner("Transcribing, diarizing, and generating meeting minutes..."):
+        return process_uploaded_recording(
+            audio_bytes,
+            filename,
+            consent_confirmed=consent_confirmed,
+        )
+
+
+def show_processing_result(result):
+    if result["status"] == "completed":
+        st.success(f"Meeting processed: {result['meeting_id']}")
+        st.caption(
+            f"{result['action_item_count']} action items · "
+            f"Speaker diarization: {result['diarization_status']}"
+        )
+    elif result["status"] == "too_short_to_analyze":
+        st.warning(result["error"], title="Meeting too short to analyze")
+    else:
+        st.warning(
+            result.get("error", f"Processing finished with status: {result['status']}"),
+            title="Meeting processing failed",
+        )
+
+
+if audio_source == "Browser microphone":
+    st.caption(
+        "Use the recorder’s Start/Stop controls. This captures your browser microphone, "
+        "not Meet tab or system audio."
+    )
+    recorded_audio = st.audio_input(
+        "Start meeting recording",
+        sample_rate=16000,
+        disabled=not consent_confirmed,
+        key="meeting_microphone_recording",
+    )
+    if recorded_audio is None:
+        st.session_state.pop("processed_browser_audio_hash", None)
+    else:
+        audio_bytes = recorded_audio.getvalue()
+        audio_hash = hashlib.sha256(audio_bytes).hexdigest()
+        if audio_hash != st.session_state.get("processed_browser_audio_hash"):
+            try:
+                result = process_audio(audio_bytes, "browser-recording.wav")
+                st.session_state["processed_browser_audio_hash"] = audio_hash
+                st.session_state["last_recording_result"] = result
+            except Exception as error:
+                st.error(f"Meeting processing failed: {error}")
+        if st.session_state.get("last_recording_result"):
+            show_processing_result(st.session_state["last_recording_result"])
+else:
+    with st.form("meeting_upload", clear_on_submit=False):
+        uploaded_audio = st.file_uploader(
+            "Meeting audio or video",
+            type=["wav", "mp3", "m4a", "flac", "ogg", "mp4", "webm"],
+            max_upload_size=512,
+            help="Maximum 512 MB. The uploaded file is processed temporarily and is not retained.",
+        )
+        process_recording = st.form_submit_button(
+            "Transcribe and analyze",
+            type="primary",
+            disabled=uploaded_audio is None or not consent_confirmed,
+            width="stretch",
+        )
+
+    if process_recording and uploaded_audio is not None:
+        try:
+            result = process_audio(uploaded_audio.getvalue(), uploaded_audio.name)
+            show_processing_result(result)
+        except Exception as error:
+            st.error(f"Meeting processing failed: {error}")
 
 st.divider()
 
