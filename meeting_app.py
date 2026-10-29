@@ -21,6 +21,7 @@ from remote_config import (
     get_setting,
 )
 from remote_workflow import process_uploaded_recording
+import meeting_bot
 from tab_recorder import tab_recorder
 
 st.set_page_config(page_title="AI Assistant", layout="wide")
@@ -167,7 +168,12 @@ def display_status(meeting):
 st.subheader("Record or process a meeting")
 audio_source = st.segmented_control(
     "Recording source",
-    options=["Browser microphone", "Tabs / system audio + microphone", "Upload file"],
+    options=[
+        "Send AI bot to a meeting",
+        "Browser microphone",
+        "Tabs / system audio + microphone",
+        "Upload file",
+    ],
     default="Browser microphone",
     key="audio_source",
 )
@@ -329,6 +335,54 @@ if audio_source == "Browser microphone":
                     st.error(f"Meeting processing failed: {error}")
             if st.session_state.get("last_recording_result"):
                 show_processing_result(st.session_state["last_recording_result"])
+elif audio_source == "Send AI bot to a meeting":
+    st.caption(
+        "The AI assistant joins your Google Meet, Zoom or Microsoft Teams meeting as a "
+        "participant named below, records it, and then transcribes it. Admit it from the "
+        "lobby if asked. Everyone in the meeting will see the bot."
+    )
+    if not meeting_bot.is_configured():
+        st.info("Set `RECALL_API_KEY` (and optionally `RECALL_REGION`) in the app secrets to enable the bot.")
+    else:
+        bot_url = st.text_input("Meeting link", placeholder="https://meet.google.com/abc-defg-hij")
+        bot_name = st.text_input("Bot name", value="AI Assistant")
+        if st.button(
+            "Send bot to meeting",
+            type="primary",
+            disabled=not (consent_confirmed and bot_url.strip()),
+        ):
+            try:
+                st.session_state["active_bot_id"] = meeting_bot.join_meeting(bot_url, bot_name)
+                st.session_state.pop("last_recording_result", None)
+            except Exception as error:
+                st.error(f"Could not start the bot: {error}")
+        if not consent_confirmed:
+            st.info("Confirm recording consent above to send the bot.")
+
+        bot_id = st.session_state.get("active_bot_id")
+        if bot_id:
+            try:
+                bot = meeting_bot.get_bot(bot_id)
+                code = meeting_bot.status_code(bot)
+                st.write(f"**Bot status:** {meeting_bot.describe_status(code)}")
+                if code in meeting_bot.FAILED:
+                    st.error("The bot could not record this meeting.")
+                elif code in meeting_bot.FINISHED:
+                    if st.session_state.get("processed_bot_id") != bot_id:
+                        audio = meeting_bot.download_audio(bot)
+                        result = process_audio(audio, "bot-recording.mp3")
+                        st.session_state["processed_bot_id"] = bot_id
+                        st.session_state["last_recording_result"] = result
+                else:
+                    left_col, right_col = st.columns(2)
+                    left_col.button("Refresh status")
+                    if right_col.button("Make the bot leave now"):
+                        meeting_bot.leave_meeting(bot_id)
+                        st.rerun()
+            except Exception as error:
+                st.error(f"Bot error: {error}")
+    if st.session_state.get("last_recording_result"):
+        show_processing_result(st.session_state["last_recording_result"])
 elif audio_source == "Tabs / system audio + microphone":
     st.caption(
         "Records the other participants together with your microphone. Click Start, then in the "
