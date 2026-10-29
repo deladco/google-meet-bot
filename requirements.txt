@@ -1,5 +1,6 @@
 streamlit>=1.66,<2
 faster-whisper>=1.2,<2
+av>=11,<19
 soundcard>=0.4,<1
 numpy>=2,<3
 scipy>=1.18,<2
