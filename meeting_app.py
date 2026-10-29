@@ -6,10 +6,11 @@ import streamlit as st
 from dotenv import load_dotenv
 
 from ai_agent import MIN_TRANSCRIPT_WORDS, load_transcript
-from controller import PROJECT_DIR, finish_recording, start_recording
-from meeting_history import MeetingHistory
-
+PROJECT_DIR = Path(__file__).resolve().parent
 load_dotenv(dotenv_path=PROJECT_DIR / ".env")
+
+from meeting_history import MeetingHistory
+from remote_workflow import process_uploaded_recording
 
 st.set_page_config(page_title="Meeting History", layout="wide")
 st.title("Meeting History")
@@ -37,91 +38,46 @@ def display_status(meeting):
     return meeting["status"].replace("_", " ").capitalize()
 
 
-if "active_recording" not in st.session_state:
-    st.session_state.active_recording = None
-if "last_recording_result" not in st.session_state:
-    st.session_state.last_recording_result = None
+st.subheader("Process a meeting recording")
+st.caption("Upload a meeting recording. Processing runs on this server; the original audio is discarded afterward.")
 
-st.subheader("Record a meeting")
-meet_url = st.text_input(
-    "Google Meet URL",
-    value=os.environ.get("MEET_URL", ""),
-    disabled=st.session_state.active_recording is not None,
-)
-if meet_url.strip():
-    st.link_button("Open Meet", meet_url.strip(), disabled=st.session_state.active_recording is not None)
-
-consent_confirmed = st.checkbox(
-    "I joined the meeting and confirmed participants consent to recording.",
-    disabled=st.session_state.active_recording is not None,
-)
-device_indices = st.text_input(
-    "Audio device indices",
-    value=os.environ.get("AUDIO_DEVICE_INDICES", "0,1"),
-    help="Comma-separated SoundCard device indexes.",
-    disabled=st.session_state.active_recording is not None,
-)
-
-start_column, stop_column, session_column = st.columns([1, 1, 3])
-with start_column:
-    if st.button(
-        "Start recording",
+with st.form("meeting_upload", clear_on_submit=False):
+    uploaded_audio = st.file_uploader(
+        "Meeting audio or video",
+        type=["wav", "mp3", "m4a", "flac", "ogg", "mp4", "webm"],
+        max_upload_size=512,
+        help="Maximum 512 MB. The uploaded file is processed temporarily and is not retained.",
+    )
+    consent_confirmed = st.checkbox(
+        "I have consent to record and transcribe this meeting."
+    )
+    process_recording = st.form_submit_button(
+        "Transcribe and analyze",
         type="primary",
-        disabled=(
-            st.session_state.active_recording is not None
-            or not meet_url.strip()
-            or not consent_confirmed
-        ),
-        use_container_width=True,
-    ):
-        try:
-            with st.spinner("Starting local transcription..."):
-                st.session_state.active_recording = start_recording(
-                    meet_url.strip(),
-                    consent_confirmed=consent_confirmed,
-                    device_indices=device_indices.strip(),
-                )
-            st.session_state.last_recording_result = None
-            st.success("Recording is active.")
-        except Exception as error:
-            st.error(f"Could not start recording: {error}")
+        disabled=uploaded_audio is None or not consent_confirmed,
+        width="stretch",
+    )
 
-with stop_column:
-    if st.button(
-        "Stop and analyze",
-        type="secondary",
-        disabled=st.session_state.active_recording is None,
-        use_container_width=True,
-    ):
-        session = st.session_state.active_recording
-        try:
-            with st.spinner("Stopping, diarizing, and generating minutes..."):
-                st.session_state.last_recording_result = finish_recording(session)
-        except Exception as error:
-            st.error(f"Recording stopped with an error: {error}")
-        finally:
-            st.session_state.active_recording = None
-
-with session_column:
-    active_session = st.session_state.active_recording
-    if active_session:
-        st.info(f"Recording: {active_session['meeting_id']}")
-    elif st.session_state.last_recording_result:
-        result = st.session_state.last_recording_result
-        if result.get("status") == "completed":
-            st.success(f"Completed: {result['meeting_id']}")
-        elif result.get("status") == "too_short_to_analyze":
-            st.warning(
-                result.get("error", "Meeting was too short to analyze."),
-                title="Meeting too short to analyze",
+if process_recording and uploaded_audio is not None:
+    try:
+        with st.spinner("Transcribing, diarizing, and generating meeting minutes..."):
+            result = process_uploaded_recording(
+                uploaded_audio.getvalue(),
+                uploaded_audio.name,
+                consent_confirmed=True,
             )
-        elif result.get("status") == "analysis_failed":
-            st.warning(
-                result.get("error", "Meeting analysis failed."),
-                title="Analysis failed",
+        if result["status"] == "completed":
+            st.success(f"Meeting processed: {result['meeting_id']}")
+            st.caption(
+                f"{result['action_item_count']} action items · "
+                f"Speaker diarization: {result['diarization_status']}"
             )
+        elif result["status"] == "too_short_to_analyze":
+            st.warning(result["error"], title="Meeting too short to analyze")
         else:
-            st.warning(f"Session status: {result.get('status', 'unknown').replace('_', ' ').capitalize()}")
+            st.warning(f"Processing finished with status: {result['status']}")
+    except Exception as error:
+        st.error(f"Meeting processing failed: {error}")
 
 st.divider()
 
@@ -162,7 +118,7 @@ with list_tab:
             }
             for meeting in filtered_meetings
         ]
-        st.dataframe(table_rows, use_container_width=True, hide_index=True)
+        st.dataframe(table_rows, width="stretch", hide_index=True)
 
         selected_id = st.selectbox(
             "Meeting details",
@@ -193,7 +149,7 @@ with list_tab:
             st.subheader("Action items")
             action_items = minutes.get("action_items", [])
             if action_items:
-                st.dataframe(action_items, use_container_width=True, hide_index=True)
+                st.dataframe(action_items, width="stretch", hide_index=True)
             else:
                 st.caption("No action items captured.")
 

@@ -1,0 +1,37 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      MEETING_DB_PATH: /app/data/meeting_history.sqlite3
+      HF_HOME: /app/models
+      HF_TOKEN: ${HF_TOKEN:-}
+      STREAMLIT_SERVER_MAX_UPLOAD_SIZE: 512
+    depends_on:
+      ollama:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8501:8501"
+    volumes:
+      - meeting-data:/app/data
+      - meeting-output:/app/output
+      - huggingface-models:/app/models
+
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "ollama", "ps"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    volumes:
+      - ollama-models:/root/.ollama
+
+volumes:
+  meeting-data:
+  meeting-output:
+  huggingface-models:
+  ollama-models:

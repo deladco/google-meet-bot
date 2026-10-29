@@ -1,44 +1,46 @@
-# Google Meet local transcription prototype
+# Google Meet meeting assistant
 
-A local Python prototype that opens Google Meet for manual joining, records selected audio devices, transcribes with Faster-Whisper, optionally assigns speakers with pyannote.audio, creates cited meeting minutes with Ollama, and stores searchable meeting history in SQLite.
+A single-host prototype for processing uploaded meeting recordings. Streamlit serves the dashboard; Faster-Whisper, pyannote.audio, Ollama, and SQLite run on the same server. Original uploads are processed from a temporary file and discarded; transcripts, speaker labels, notes, structured action items, and the SQLite history are persisted.
 
-## Local setup
+## Deploy on one server
 
-Requirements: Python 3.12, Git, and the Ollama desktop runtime.
+Requirements: a Linux host with Docker Engine and Docker Compose, at least 8 GB RAM (more is recommended for CPU inference), and disk space for models and recordings' derived artifacts.
 
-```powershell
-py -3.12 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-Copy-Item .env.example .env
+1. Clone this repository on the server.
+2. Copy `.env.example` to `.env` and set `HF_TOKEN`. Before using diarization, accept the [pyannote community pipeline conditions](https://huggingface.co/pyannote/speaker-diarization-community-1).
+3. Start the stack and pull the local Ollama model:
+
+```bash
+docker compose up -d --build
+docker compose exec ollama ollama pull llama3.2:3b
 ```
 
-Set `MEET_URL` in `.env`. For speaker diarization, accept the [pyannote community pipeline conditions](https://huggingface.co/pyannote/speaker-diarization-community-1) and set `HF_TOKEN` in `.env`. Pull the local notes model:
+4. Open the dashboard through an SSH tunnel:
 
-```powershell
-ollama pull llama3.2:3b
+```bash
+ssh -L 8501:127.0.0.1:8501 user@your-server
 ```
 
-Start the local dashboard:
+Then browse to `http://127.0.0.1:8501`. Compose binds Streamlit to the server's loopback interface by default. For wider access, put it behind an authenticated HTTPS reverse proxy; do not expose an unauthenticated meeting archive directly to the internet.
 
-```powershell
-streamlit run meeting_app.py
-```
+## Processing a meeting
 
-Use **Open Meet** to join manually, confirm participant consent, then select **Start recording**. **Stop and analyze** stops capture, diarizes speakers when configured, creates timestamped Markdown and JSON minutes, and updates `meeting_history.sqlite3`.
+Upload a consented recording (`wav`, `mp3`, `m4a`, `flac`, `ogg`, `mp4`, or `webm`) in the dashboard and select **Transcribe and analyze**. Processing runs on the server. It transcribes the audio, assigns speaker labels with pyannote when `HF_TOKEN` is configured, then creates timestamped Markdown and structured JSON minutes with Ollama.
+
+The Docker Compose volumes persist the meeting database, generated transcripts/notes, Hugging Face model cache, and Ollama model cache across container restarts. The uploaded original audio is not retained by the application.
 
 ## Meeting history
 
-The dashboard provides meeting details, FTS5 keyword search, and Ollama-backed questions over matched transcript and notes. The CLI is also available:
+The dashboard provides meeting details, FTS5 keyword search, and Ollama-backed questions over matched transcript and notes. The CLI is also available inside the app container or local environment:
 
-```powershell
+```bash
 python meeting_history.py list
 python meeting_history.py search "Project X deadline"
 python meeting_history.py ask "Which tasks were assigned last week?"
 ```
 
-## Deployment limits
+## Desktop-only workflow
 
-This is a **local prototype**, not a ready-to-run Streamlit Community Cloud app. Community Cloud runs on a remote server, so it cannot capture your desktop microphone/speaker devices or open Meet on your computer. The current workflow also expects a local Ollama server and a writable local SQLite database. A cloud deployment needs a separate design for user-uploaded recordings or a remote capture service, hosted model inference, secret management, and persistent database storage.
+`controller.py` and `live_transcriber.py` remain available for local desktop capture. They use the host machine's audio devices and are not used by the remote upload dashboard.
 
-Never commit `.env`, OAuth credentials, tokens, recordings, transcripts, or meeting notes. Those paths are excluded by `.gitignore`.
+Never commit `.env`, OAuth credentials, tokens, virtual environments, databases, recordings, transcripts, or meeting notes. Those paths are excluded by `.gitignore` and `.dockerignore`.

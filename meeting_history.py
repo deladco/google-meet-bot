@@ -1,4 +1,5 @@
 import argparse
+import os
 import re
 import sqlite3
 from contextlib import contextmanager
@@ -6,7 +7,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 PROJECT_DIR = Path(__file__).resolve().parent
-DEFAULT_DB_PATH = PROJECT_DIR / "meeting_history.sqlite3"
+DEFAULT_DB_PATH = Path(
+    os.environ.get("MEETING_DB_PATH", str(PROJECT_DIR / "meeting_history.sqlite3"))
+)
 STOP_WORDS = {
     "a", "an", "and", "are", "as", "at", "be", "by", "did", "do",
     "for", "from", "how", "i", "in", "is", "it", "of", "on", "or",
@@ -223,9 +226,12 @@ class MeetingHistory:
                 f"Content:\n{match['content'][:6000]}"
             )
 
-        from ollama import chat
+        from ollama import Client
 
-        response = chat(
+        client = Client(
+            host=os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+        )
+        response = client.chat(
             model=model,
             messages=[
                 {
