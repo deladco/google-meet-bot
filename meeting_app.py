@@ -116,6 +116,24 @@ def show_processing_result(result):
             f"{result['action_item_count']} action items · "
             f"Speaker diarization: {result['diarization_status']}"
         )
+        notes_path = Path(result["notes_path"])
+        if notes_path.exists():
+            st.download_button(
+                "Download notes (.md)",
+                data=notes_path.read_text(encoding="utf-8"),
+                file_name=f"meeting_notes_{result['meeting_id']}.md",
+                mime="text/markdown",
+                key=f"download_completed_notes_{result['meeting_id']}",
+            )
+        minutes_path = Path(result["minutes_path"])
+        if minutes_path.exists():
+            st.download_button(
+                "Download structured minutes (.json)",
+                data=minutes_path.read_text(encoding="utf-8"),
+                file_name=f"meeting_minutes_{result['meeting_id']}.json",
+                mime="application/json",
+                key=f"download_completed_minutes_{result['meeting_id']}",
+            )
     elif result["status"] == "too_short_to_analyze":
         st.warning(result["error"], title="Meeting too short to analyze")
     else:
