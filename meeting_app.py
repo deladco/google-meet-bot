@@ -252,8 +252,25 @@ with list_tab:
         if selected["notes_path"]:
             notes_path = Path(selected["notes_path"])
             if notes_path.exists():
+                notes_markdown = notes_path.read_text(encoding="utf-8")
                 with st.expander("Meeting notes", expanded=True):
-                    st.markdown(notes_path.read_text(encoding="utf-8"))
+                    st.markdown(notes_markdown)
+                download_columns = st.columns(2)
+                download_columns[0].download_button(
+                    "Download notes (.md)",
+                    data=notes_markdown,
+                    file_name=f"meeting_notes_{selected['meeting_id']}.md",
+                    mime="text/markdown",
+                    key=f"download_notes_{selected['meeting_id']}",
+                )
+                if selected["minutes_json"]:
+                    download_columns[1].download_button(
+                        "Download structured minutes (.json)",
+                        data=selected["minutes_json"],
+                        file_name=f"meeting_minutes_{selected['meeting_id']}.json",
+                        mime="application/json",
+                        key=f"download_minutes_{selected['meeting_id']}",
+                    )
 
 with search_tab:
     query = st.text_input("Search transcripts, notes, owners, or deadlines")
