@@ -144,10 +144,19 @@ def process_uploaded_recording(file_bytes, filename, consent_confirmed):
                         "Audio was present but no words were recognized. Check that "
                         "the speech is audible and in a supported language."
                     )
-                raise ValueError(
+                message = (
                     f"No speech was detected in the uploaded recording "
                     f"({duration:.1f}s, peak level {peak:.3f}). {hint}"
                 )
+                transcript_path.write_text("", encoding="utf-8")
+                history.index_file(session_id, "transcript", transcript_path)
+                history.update_status(session_id, "no_speech_detected", error=message)
+                return {
+                    "status": "no_speech_detected",
+                    "meeting_id": session_id,
+                    "transcript_path": transcript_path,
+                    "error": message,
+                }
 
             _write_jsonl(transcript_path, entries)
             history.index_file(session_id, "transcript", transcript_path)

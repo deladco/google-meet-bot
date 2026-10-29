@@ -109,7 +109,34 @@ def process_audio(audio_bytes, filename):
         )
 
 
+def show_saved_transcript(result):
+    transcript_path = Path(result.get("transcript_path", ""))
+    if not transcript_path.is_file():
+        return
+    st.caption(f"Transcript saved: {transcript_path}")
+    transcript_text = transcript_path.read_text(encoding="utf-8")
+    if transcript_text.strip():
+        with st.expander("Transcript", expanded=result["status"] != "completed"):
+            try:
+                for entry in load_transcript(transcript_path):
+                    st.write(f"**{entry.get('speaker', 'Unknown')}**: {entry.get('text', '')}")
+            except Exception:
+                st.code(transcript_text)
+        st.download_button(
+            "Download transcript (.jsonl)",
+            data=transcript_text,
+            file_name=f"transcript_{result['meeting_id']}.jsonl",
+            mime="application/jsonl",
+            key=f"download_transcript_{result['meeting_id']}",
+        )
+
+
 def show_processing_result(result):
+    show_processing_result_body(result)
+    show_saved_transcript(result)
+
+
+def show_processing_result_body(result):
     if result["status"] == "completed":
         st.success(f"Meeting processed: {result['meeting_id']}")
         st.caption(
