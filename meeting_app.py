@@ -1,5 +1,4 @@
 import hashlib
-import hmac
 import json
 import os
 from pathlib import Path
@@ -22,38 +21,6 @@ from remote_config import (
 from remote_workflow import process_uploaded_recording
 
 st.set_page_config(page_title="AI Assistant", layout="wide")
-
-
-def require_password():
-    expected = next(
-        (
-            value
-            for name in ("APP_PASSWORD", "Password", "PASSWORD")
-            if (value := get_setting(name))
-        ),
-        None,
-    )
-    if st.session_state.get("authenticated"):
-        return
-    st.title("AI Assistant")
-    if not expected:
-        st.error(
-            "Access is locked: no password is configured. Set `Password` in .env "
-            "or in the Streamlit app secrets."
-        )
-        st.stop()
-    with st.form("login"):
-        entered = st.text_input("Password", type="password")
-        submitted = st.form_submit_button("Unlock", type="primary")
-    if submitted:
-        if hmac.compare_digest(entered.encode(), expected.encode()):
-            st.session_state["authenticated"] = True
-            st.rerun()
-        st.error("Incorrect password.")
-    st.stop()
-
-
-require_password()
 st.title("AI Assistant")
 st.caption("Created by Daryna Ladanovska · Version 1.0")
 st.subheader("Meeting history")
@@ -68,9 +35,6 @@ def ollama_target_label(host):
 
 
 with st.sidebar:
-    if st.button("Lock app"):
-        st.session_state["authenticated"] = False
-        st.rerun()
     st.subheader("Ollama connection")
     ollama_host = get_ollama_host()
     api_key_configured = bool(get_setting("OLLAMA_API_KEY"))
