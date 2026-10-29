@@ -11,6 +11,17 @@ OUTPUT = PROJECT_DIR / "output"
 DEFAULT_TRANSCRIPT_FILE = OUTPUT / "transcript.jsonl"
 MODEL = get_ollama_model()
 MIN_TRANSCRIPT_WORDS = 20
+MINUTES_RESPONSE_CONTRACT = (
+	"Return only valid JSON with exactly these keys: summary, summary_refs, "
+	"discussion_topics, decisions, action_items, unresolved_questions. "
+	"summary must be a string and summary_refs must be an array of transcript "
+	"segment indices. Each discussion_topics item must contain topic, details, "
+	"and segment_indices. Each decisions item must contain decision and "
+	"segment_indices. Each action_items item must contain task, owner, "
+	"deadline, and segment_indices. Each unresolved_questions item must "
+	"contain question and segment_indices. Use empty arrays where there is no "
+	"evidence. Do not return Markdown, a code fence, or any other keys."
+)
 MINUTES_SCHEMA = {
 	"type": "object",
 	"properties": {
@@ -188,14 +199,14 @@ def analyze_meeting(transcript_path=DEFAULT_TRANSCRIPT_FILE):
 
 	response = get_ollama_client().chat(
 		model=MODEL,
-		format=MINUTES_SCHEMA,
+		format="json",
 		think=False,
 		options={"temperature": 0},
 		messages=[
 			{
 				"role": "system",
 				"content": (
-					"Return structured meeting minutes. Every topic, decision, action, "
+					f"{MINUTES_RESPONSE_CONTRACT} Every topic, decision, action, "
 					"question, and summary must cite relevant segment_indices from the "
 					"provided transcript. Never invent or infer owners, deadlines, "
 					"decisions, or facts. Use 'Not specified' when an owner or deadline "

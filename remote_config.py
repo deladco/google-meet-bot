@@ -10,7 +10,7 @@ PROJECT_DIR = Path(__file__).resolve().parent
 LOCAL_OLLAMA_HOST = "http://127.0.0.1:11434"
 CLOUD_OLLAMA_HOST = "https://ollama.com"
 LOCAL_OLLAMA_MODEL = "llama3.2:3b"
-CLOUD_OLLAMA_MODEL = "glm-5.3-flash"
+CLOUD_OLLAMA_MODEL = "gpt-oss:20b"
 load_dotenv(dotenv_path=PROJECT_DIR / ".env")
 
 
