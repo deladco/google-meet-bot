@@ -1,6 +1,8 @@
 import gc
 import json
 import os
+import subprocess
+import sys
 import tempfile
 import wave
 from datetime import datetime, timedelta, timezone
@@ -40,6 +42,33 @@ def _release_whisper():
     # Free the speech model before diarization/analysis to stay under the host's RAM limit.
     _whisper_model.cache_clear()
     gc.collect()
+
+
+def _diarize_in_subprocess(wav_path, transcript_path, token, timeout=900):
+    # Separate process: if the host kills it for memory, the app itself survives.
+    code = (
+        "import os, sys\n"
+        "from diarization import diarize_transcript\n"
+        "diarize_transcript(sys.argv[1], sys.argv[2], token=os.environ['HF_TOKEN'])\n"
+    )
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", code, str(wav_path), str(transcript_path)],
+            cwd=PROJECT_DIR,
+            env={**os.environ, "HF_TOKEN": token},
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError("Speaker identification timed out; speakers remain Unknown.") from error
+    if result.returncode != 0:
+        if result.returncode in (-9, 137):
+            reason = "server ran out of memory"
+        else:
+            lines = result.stderr.strip().splitlines()
+            reason = lines[-1] if lines else f"exit code {result.returncode}"
+        raise RuntimeError(f"Speaker identification failed ({reason}); speakers remain Unknown.")
 
 
 def _write_pcm_wav(path, samples, sample_rate):
@@ -210,11 +239,9 @@ def process_uploaded_recording(
             hf_token = get_setting("HF_TOKEN")
             if hf_token:
                 try:
-                    from diarization import diarize_transcript
-
                     wav_path = Path(temp_dir) / "diarization.wav"
                     _write_pcm_wav(wav_path, samples, SAMPLE_RATE)
-                    diarize_transcript(wav_path, transcript_path, token=hf_token)
+                    _diarize_in_subprocess(wav_path, transcript_path, hf_token)
                     entries = [
                         json.loads(line)
                         for line in transcript_path.read_text(encoding="utf-8").splitlines()

@@ -44,7 +44,10 @@ class MeetingHistory:
 
     def _initialize(self):
         with self._connection() as connection:
-            connection.execute("PRAGMA journal_mode = WAL")
+            try:
+                connection.execute("PRAGMA journal_mode = WAL")
+            except sqlite3.OperationalError:
+                pass  # another session is switching modes; WAL persists once set
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS meetings (
@@ -65,14 +68,14 @@ class MeetingHistory:
                 row["name"]
                 for row in connection.execute("PRAGMA table_info(meetings)")
             }
-            if "minutes_path" not in columns:
-                connection.execute("ALTER TABLE meetings ADD COLUMN minutes_path TEXT")
-            if "minutes_json" not in columns:
-                connection.execute("ALTER TABLE meetings ADD COLUMN minutes_json TEXT")
-            if "owner_id" not in columns:
-                connection.execute("ALTER TABLE meetings ADD COLUMN owner_id TEXT")
-            if "owner_email" not in columns:
-                connection.execute("ALTER TABLE meetings ADD COLUMN owner_email TEXT")
+            for column in ("minutes_path", "minutes_json", "owner_id", "owner_email"):
+                if column not in columns:
+                    try:
+                        connection.execute(f"ALTER TABLE meetings ADD COLUMN {column} TEXT")
+                    except sqlite3.OperationalError as error:
+                        # Another session added it between the check and the ALTER.
+                        if "duplicate column" not in str(error).casefold():
+                            raise
             connection.execute(
                 """
                 CREATE VIRTUAL TABLE IF NOT EXISTS meeting_search
