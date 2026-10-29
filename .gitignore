@@ -1,10 +1,29 @@
+# Environment files and secrets
 .env
+.env.*
+!.env.example
 credentials.json
 token.json
-.venv/
-.venv312/
-__pycache__/
 .streamlit/secrets.toml
-bot_profile/
+
+# Python environments and bytecode
+.venv/
+.venv*/
+venv/
+env/
+__pycache__/
+*.py[codz]
+*$py.class
+
+# Local meeting data and browser profiles
 output/
+bot_profile/
 meeting_history.sqlite3*
+
+# Test, lint, and build artifacts
+.pytest_cache/
+.ruff_cache/
+.coverage*
+build/
+dist/
+*.egg-info/
