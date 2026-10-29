@@ -51,7 +51,7 @@ ENDED_TEXTS = (
 
 
 def service_client():
-    key = os.environ.get("SUPABASE_SERVICE_KEY")
+    key = os.environ.get("SUPABASE_SERVICE_KEY") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
     if not key:
         raise SystemExit("Set SUPABASE_SERVICE_KEY in .env (Supabase > Settings > API > service_role).")
     from supabase import create_client
@@ -201,6 +201,43 @@ def meeting_over(page):
     return any(text.lower() in body.lower() for text in ENDED_TEXTS)
 
 
+DENIED_TEXTS = (
+    "You can't join this video call",
+    "You can’t join this video call",
+    "You aren't allowed to join",
+    "Your request to join was denied",
+    "No one responded to your request",
+    "denied your request",
+)
+LOBBY_TEXTS = ("Asking to be let in", "Someone will let you in", "Waiting for the host", "waiting room")
+STATE_FILE = Path(os.environ.get("BOT_STATE_FILE") or PROJECT_DIR / "bot_google_state.json")
+CHANNEL = os.environ.get("BOT_BROWSER_CHANNEL") or None
+
+
+def page_text(page):
+    try:
+        return page.inner_text("body", timeout=1500)
+    except Exception:
+        return ""
+
+
+def denied_reason(page):
+    body = page_text(page).lower()
+    if any(text.lower() in body for text in DENIED_TEXTS):
+        hint = (
+            "Run `python bot_login.py` once to sign the bot in to a Google account."
+            if not STATE_FILE.exists()
+            else "The bot's Google account was not allowed in; invite it to the meeting."
+        )
+        return f"The meeting refused the bot ({hint})"
+    return None
+
+
+def in_lobby(page):
+    body = page_text(page).lower()
+    return any(text.lower() in body for text in LOBBY_TEXTS)
+
+
 def record_meeting(db, job, wav_path):
     from playwright.sync_api import sync_playwright
 
@@ -208,6 +245,8 @@ def record_meeting(db, job, wav_path):
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(
             headless=HEADLESS,
+            channel=CHANNEL,
+            ignore_default_args=["--enable-automation"],
             args=[
                 "--use-fake-ui-for-media-stream",
                 "--use-fake-device-for-media-stream",
@@ -215,16 +254,31 @@ def record_meeting(db, job, wav_path):
                 "--disable-blink-features=AutomationControlled",
             ],
         )
-        context = browser.new_context(viewport={"width": 1280, "height": 800})
+        context = browser.new_context(
+            viewport={"width": 1280, "height": 800},
+            storage_state=str(STATE_FILE) if STATE_FILE.exists() else None,
+        )
         page = context.new_page()
         try:
             join(page, job["meeting_url"], job["bot_name"])
             lobby_deadline = time.time() + LOBBY_MINUTES * 60
+            last_message = None
             while not in_meeting(page):
+                reason = denied_reason(page)
+                if reason:
+                    raise RuntimeError(reason)
                 if time.time() > lobby_deadline:
                     raise RuntimeError("The bot was not admitted to the meeting in time.")
                 if job_status(db, job["id"]) == "stop_requested":
                     return False
+                message = (
+                    "Waiting in the lobby - admit the bot from the meeting"
+                    if in_lobby(page)
+                    else "Opening the meeting page"
+                )
+                if message != last_message:
+                    set_job(db, job["id"], message=message)
+                    last_message = message
                 time.sleep(3)
 
             recorder.start()

@@ -28,3 +28,5 @@ meeting_history.sqlite3*
 build/
 dist/
 *.egg-info/
+
+bot_google_state.json
