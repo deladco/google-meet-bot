@@ -1,0 +1,13 @@
+streamlit>=1.66,<2
+faster-whisper>=1.2,<2
+soundcard>=0.4,<1
+numpy>=2,<3
+scipy>=1.18,<2
+pyannote.audio>=4,<5
+ollama>=0.6,<1
+python-dotenv>=1.2,<2
+playwright>=1.64,<2
+google-auth-oauthlib>=1.5,<2
+google-auth-httplib2>=0.4,<1
+google-api-python-client>=2.201,<3
+requests>=2.34,<3

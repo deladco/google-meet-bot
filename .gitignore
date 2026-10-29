@@ -1,0 +1,10 @@
+.env
+credentials.json
+token.json
+.venv/
+.venv312/
+__pycache__/
+.streamlit/secrets.toml
+bot_profile/
+output/
+meeting_history.sqlite3*
