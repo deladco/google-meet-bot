@@ -141,6 +141,28 @@ def _attach_references(items, entries, key):
 	return validated
 
 
+def _parse_minutes_response(response):
+	content = response.message.content
+	if not isinstance(content, str) or not content.strip():
+		raise ValueError(
+			"Ollama returned an empty response while generating meeting notes. "
+			"Please try again."
+		)
+
+	try:
+		minutes = json.loads(content)
+	except json.JSONDecodeError as error:
+		raise ValueError(
+			"Ollama returned invalid structured minutes. Please try again."
+		) from error
+
+	if not isinstance(minutes, dict):
+		raise ValueError(
+			"Ollama returned invalid structured minutes. Please try again."
+		)
+	return minutes
+
+
 def analyze_meeting(transcript_path=DEFAULT_TRANSCRIPT_FILE):
 	entries = load_transcript(transcript_path)
 	conversation = "\n".join(
@@ -158,6 +180,7 @@ def analyze_meeting(transcript_path=DEFAULT_TRANSCRIPT_FILE):
 	response = get_ollama_client().chat(
 		model=MODEL,
 		format=MINUTES_SCHEMA,
+		think=False,
 		options={"temperature": 0},
 		messages=[
 			{
@@ -174,7 +197,7 @@ def analyze_meeting(transcript_path=DEFAULT_TRANSCRIPT_FILE):
 		]
 	)
 
-	minutes = json.loads(response.message.content)
+	minutes = _parse_minutes_response(response)
 	minutes["summary_refs"] = _references(minutes.get("summary_refs", []), entries)
 	for key in ("discussion_topics", "decisions", "action_items", "unresolved_questions"):
 		minutes[key] = _attach_references(minutes.get(key, []), entries, key)
