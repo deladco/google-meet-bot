@@ -23,6 +23,7 @@ from remote_config import (
 from meeting_history import MeetingHistory
 from remote_workflow import process_uploaded_recording
 import meeting_bot
+import minutes_store
 import rag
 from tab_recorder import tab_recorder
 from transcript_quality import LEARNED_FILE, vocabulary
@@ -777,6 +778,149 @@ def meetings_page():
         meeting_card(meeting, "list")
 
 
+def sources_caption(item):
+    lines = minutes_store.source_text(item)
+    if lines:
+        st.caption(":material/schedule: " + "  \n".join(lines))
+
+
+def persist_minutes(meeting, minutes, message):
+    try:
+        minutes_store.save_minutes(auth_db.client_for_user(), meeting, minutes, user_id=st.session_state.get("user_id"))
+    except Exception as error:
+        st.error(f"Could not save: {error}")
+        return False
+    st.toast(message, icon=":material/check_circle:")
+    return True
+
+
+def show_minutes(meeting):
+    minutes = meeting["minutes"]
+    cloud = meeting["source"] == "cloud"
+    approved = minutes_store.is_approved(minutes)
+    info = minutes_store.review(minutes)
+    if approved:
+        st.success(
+            f"Approved{' by ' + info['approved_by'] if info.get('approved_by') else ''} · {when_full(info.get('approved_at'))}",
+            icon=":material/verified:",
+        )
+    else:
+        st.info(
+            "AI draft. Check the summary, decisions and tasks against their sources, edit what is wrong, "
+            "then approve.",
+            icon=":material/edit_note:",
+        )
+    if cloud:
+        edit_column, approve_column = st.columns(2)
+        if edit_column.button("Edit notes", icon=":material/edit:", width="stretch", key=f"edit_btn_{meeting['id']}"):
+            st.session_state[f"editing_{meeting['id']}"] = True
+            st.rerun()
+        if not approved and approve_column.button(
+            "Approve notes", icon=":material/verified:", type="primary", width="stretch", key=f"approve_{meeting['id']}"
+        ):
+            minutes_store.approve(minutes, by=viewer_email)
+            if persist_minutes(meeting, minutes, "Notes approved"):
+                st.rerun()
+        if approved and approve_column.button("Reopen as draft", width="stretch", key=f"reopen_{meeting['id']}"):
+            minutes["review"] = {"status": "draft", "edited": info.get("edited", False)}
+            if persist_minutes(meeting, minutes, "Reopened as draft"):
+                st.rerun()
+    else:
+        st.caption("Editing and approval need the cloud copy of this meeting (sign in and process it again).")
+
+    st.subheader("Summary")
+    st.write(minutes.get("summary") or "No summary available.")
+    for line in minutes_store.source_text({"transcript_refs": minutes.get("summary_refs")}, limit=1):
+        st.caption(f":material/schedule: {line}")
+
+    decisions = minutes_list(meeting, "decisions")
+    st.subheader(f"Decisions ({len(decisions)})")
+    if decisions:
+        for decision in decisions:
+            with st.container(border=True):
+                st.markdown(decision.get("decision", ""))
+                sources_caption(decision)
+    else:
+        st.caption("No decisions were recorded.")
+
+    items = minutes_list(meeting, "action_items")
+    st.subheader(f"Action items ({len(items)})")
+    if items:
+        for item in items:
+            with st.container(border=True):
+                done = item.get("status") == "done"
+                st.markdown(f"~~{item.get('task', '')}~~" if done else f"**{item.get('task', '')}**")
+                due = minutes_store.parse_due(item.get("due"))
+                st.caption(
+                    f"Owner: {item.get('owner') or 'Not specified'} · "
+                    f"Deadline: {item.get('deadline') or 'Not specified'}"
+                    + (f" · Due {due.strftime('%d %b %Y')}" if due else "")
+                    + (" · Done" if done else "")
+                )
+                sources_caption(item)
+        st.page_link(PAGE_ACTIONS, label="Track these on the task board", icon=":material/checklist:")
+    else:
+        st.caption("No action items were captured.")
+
+    topics = minutes_list(meeting, "discussion_topics")
+    if topics:
+        st.subheader("Discussion topics")
+        for topic in topics:
+            with st.expander(str(topic.get("topic", "Topic"))):
+                st.write(topic.get("details", ""))
+    questions = minutes_list(meeting, "unresolved_questions")
+    if questions:
+        st.subheader("Open questions")
+        for question in questions:
+            st.markdown(f"- {question.get('question', '')}")
+
+
+def edit_minutes_form(meeting):
+    minutes = meeting["minutes"]
+    mid = meeting["id"]
+    st.subheader("Edit notes")
+    st.caption("Changes are saved to your account and the notes are regenerated. You approve them afterwards.")
+    with st.form(f"edit_form_{mid}"):
+        summary = st.text_area("Summary", value=minutes.get("summary") or "", height=180)
+        decisions_text = st.text_area(
+            "Decisions (one per line)",
+            value="\n".join(str(d.get("decision", "")) for d in minutes_list(meeting, "decisions")),
+            height=140,
+        )
+        st.markdown("**Action items**")
+        rows = []
+        for index, item in enumerate(minutes_list(meeting, "action_items")):
+            with st.container(border=True):
+                task = st.text_input("Task", value=item.get("task", ""), key=f"et_{mid}_{index}")
+                owner_column, deadline_column = st.columns(2)
+                owner = owner_column.text_input("Owner", value=item.get("owner", ""), key=f"eo_{mid}_{index}")
+                deadline = deadline_column.text_input(
+                    "Deadline", value=item.get("deadline", ""), key=f"ed_{mid}_{index}", placeholder="e.g. 2026-11-05"
+                )
+                remove = st.checkbox("Remove this item", key=f"er_{mid}_{index}")
+            rows.append({"id": item.get("id"), "task": task, "owner": owner, "deadline": deadline, "remove": remove})
+        with st.container(border=True):
+            new_task = st.text_input("Add an action item", key=f"nt_{mid}", placeholder="Optional")
+            new_owner_column, new_deadline_column = st.columns(2)
+            new_owner = new_owner_column.text_input("Owner", key=f"no_{mid}")
+            new_deadline = new_deadline_column.text_input("Deadline", key=f"nd_{mid}")
+        rows.append({"task": new_task, "owner": new_owner, "deadline": new_deadline})
+        save_column, cancel_column = st.columns(2)
+        save = save_column.form_submit_button("Save changes", type="primary", width="stretch")
+        cancel = cancel_column.form_submit_button("Cancel", width="stretch")
+    if cancel:
+        st.session_state.pop(f"editing_{mid}", None)
+        st.rerun()
+    if save:
+        updated = minutes_store.apply_edits(minutes, summary, decisions_text, rows)
+        if persist_minutes(meeting, updated, "Notes saved as draft"):
+            for key in [k for k in st.session_state if str(k).endswith(f"_{mid}") or f"_{mid}_" in str(k)]:
+                if key.startswith(("et_", "eo_", "ed_", "er_", "nt_", "no_", "nd_")):
+                    st.session_state.pop(key, None)
+            st.session_state.pop(f"editing_{mid}", None)
+            st.rerun()
+
+
 def show_meeting(meeting):
     st.header(meeting_title(meeting))
     st.caption(
@@ -791,41 +935,11 @@ def show_meeting(meeting):
     if not minutes:
         st.info("A summary has not been generated for this meeting yet.")
     else:
-        st.subheader("Summary")
-        st.write(minutes.get("summary") or "No summary available.")
-
-        decisions = minutes_list(meeting, "decisions")
-        st.subheader(f"Decisions ({len(decisions)})")
-        if decisions:
-            for decision in decisions:
-                st.markdown(f"- {decision.get('decision', '')}")
+        minutes_store.ensure_ids(minutes, meeting["id"])
+        if st.session_state.get(f"editing_{meeting['id']}") and meeting["source"] == "cloud":
+            edit_minutes_form(meeting)
         else:
-            st.caption("No decisions were recorded.")
-
-        items = minutes_list(meeting, "action_items")
-        st.subheader(f"Action items ({len(items)})")
-        if items:
-            for item in items:
-                with st.container(border=True):
-                    st.markdown(f"**{item.get('task', '')}**")
-                    st.caption(
-                        f"Owner: {item.get('owner') or 'Not specified'} · "
-                        f"Deadline: {item.get('deadline') or 'Not specified'}"
-                    )
-        else:
-            st.caption("No action items were captured.")
-
-        topics = minutes_list(meeting, "discussion_topics")
-        if topics:
-            st.subheader("Discussion topics")
-            for topic in topics:
-                with st.expander(str(topic.get("topic", "Topic"))):
-                    st.write(topic.get("details", ""))
-        questions = minutes_list(meeting, "unresolved_questions")
-        if questions:
-            st.subheader("Open questions")
-            for question in questions:
-                st.markdown(f"- {question.get('question', '')}")
+            show_minutes(meeting)
 
     entries = parse_transcript(meeting["transcript"])
     with st.expander(f"Transcript ({len(entries)} lines)" if entries else "Transcript", icon=":material/notes:"):
@@ -937,21 +1051,93 @@ def chat_page():
         st.rerun()
 
 
-def actions_page():
-    st.title("Action Items")
-    meetings = load_meetings()
-    rows = []
-    for meeting in meetings:
-        for item in minutes_list(meeting, "action_items"):
-            rows.append(
-                {
-                    "Task": item.get("task", ""),
-                    "Owner": item.get("owner", "Not specified"),
-                    "Deadline": item.get("deadline", "Not specified"),
-                    "Meeting": meeting_title(meeting),
-                    "Date": when_full(meeting["recorded_at"]),
-                }
+TASK_VIEWS = ["Open", "Done", "All"]
+DUE_FILTERS = {
+    "Any time": None,
+    "Overdue": {"overdue"},
+    "Due today": {"today"},
+    "Next 7 days": {"today", "week"},
+    "No due date": {"none"},
+}
+
+
+def update_task(meeting_id, task_id, widget_key, field):
+    meeting = next((m for m in load_meetings() if m["id"] == meeting_id), None)
+    if meeting is None or meeting["source"] != "cloud":
+        return
+    value = st.session_state.get(widget_key)
+    if field == "status":
+        value = "done" if value else "open"
+    if not minutes_store.set_task(meeting["minutes"], task_id, **{field: value}):
+        return
+    try:
+        minutes_store.save_minutes(
+            auth_db.client_for_user(), meeting, meeting["minutes"], user_id=st.session_state.get("user_id")
+        )
+        st.session_state.pop("task_error", None)
+    except Exception as error:
+        st.session_state["task_error"] = f"Could not save the change: {error}"
+
+
+def due_label(row, today):
+    bucket = minutes_store.due_bucket(row, today)
+    if not row["due"]:
+        return "No due date"
+    text = row["due"].strftime("%d %b")
+    if bucket == "overdue":
+        return f":red[Overdue · {text}]"
+    if bucket == "today":
+        return ":orange[Due today]"
+    return f"Due {text}"
+
+
+def task_card(row, today):
+    meeting = row["meeting"]
+    editable = meeting["source"] == "cloud"
+    base = f"{meeting['id']}_{row['id']}"
+    with st.container(border=True):
+        st.checkbox(
+            row["task"],
+            value=row["done"],
+            key=f"done_{base}",
+            disabled=not editable,
+            on_change=update_task,
+            args=(meeting["id"], row["id"], f"done_{base}", "status"),
+        )
+        st.caption(f"{row['owner']} · {due_label(row, today)} · {meeting_title(meeting)}")
+        with st.expander("Details"):
+            owner_column, due_column = st.columns(2)
+            owner_column.text_input(
+                "Owner",
+                value=row["owner"] if row["owner"] != "Not specified" else "",
+                key=f"owner_{base}",
+                disabled=not editable,
+                on_change=update_task,
+                args=(meeting["id"], row["id"], f"owner_{base}", "owner"),
             )
+            due_column.date_input(
+                "Due date",
+                value=row["due"],
+                key=f"due_{base}",
+                disabled=not editable,
+                format="YYYY-MM-DD",
+                on_change=update_task,
+                args=(meeting["id"], row["id"], f"due_{base}", "due"),
+            )
+            if row["deadline"] != "Not specified":
+                st.caption(f"Said in the meeting: {row['deadline']}")
+            sources_caption({"transcript_refs": row["refs"]})
+            if st.button("Open meeting", key=f"goto_{base}", icon=":material/arrow_forward:", type="tertiary"):
+                open_meeting(meeting["id"])
+            if not editable:
+                st.caption("Read-only: this meeting is not saved to your account.")
+
+
+def actions_page():
+    st.title("Task board")
+    st.caption("Tasks from your meeting notes. Tick them off, set due dates, and jump back to where they came from.")
+    meetings = load_meetings()
+    rows = minutes_store.task_rows(meetings)
     if not rows:
         st.info(
             "No action items yet. Tasks assigned in your meetings are collected here "
@@ -960,41 +1146,81 @@ def actions_page():
         if not meetings:
             first_meeting_help()
         return
+    if st.session_state.get("task_error"):
+        st.error(st.session_state["task_error"])
 
-    unassigned = sum(r["Owner"].strip().casefold() in {"", "not specified"} for r in rows)
-    with_deadline = sum(r["Deadline"].strip().casefold() not in {"", "not specified"} for r in rows)
-    metric_columns = st.columns(3)
-    metric_columns[0].metric("Total", len(rows), border=True)
-    metric_columns[1].metric("No owner", unassigned, border=True)
-    metric_columns[2].metric("Has deadline", with_deadline, border=True)
+    today = datetime.now().date()
+    buckets = [minutes_store.due_bucket(r, today) for r in rows]
+    metric_columns = st.columns(4)
+    metric_columns[0].metric("Open", sum(not r["done"] for r in rows), border=True)
+    metric_columns[1].metric("Overdue", buckets.count("overdue"), border=True)
+    metric_columns[2].metric("Next 7 days", buckets.count("today") + buckets.count("week"), border=True)
+    metric_columns[3].metric("Done", sum(r["done"] for r in rows), border=True)
 
+    view = st.segmented_control("Show", TASK_VIEWS, default="Open", label_visibility="collapsed") or "Open"
     needle = st.text_input(
-        "Search tasks", label_visibility="collapsed", placeholder="Search tasks", icon=":material/search:"
+        "Search tasks", label_visibility="collapsed", placeholder="Search tasks or meetings", icon=":material/search:"
     ).strip().casefold()
-    owners = sorted({r["Owner"] for r in rows})
-    chosen_owners = st.multiselect("Owner", owners, placeholder="All owners")
+    with st.expander("Filter and sort", icon=":material/tune:"):
+        due_filter = st.selectbox("Due", list(DUE_FILTERS))
+        owners = sorted({r["owner"] for r in rows})
+        chosen_owners = st.multiselect("Owner", owners, placeholder="All owners")
+        meeting_titles = sorted({meeting_title(r["meeting"]) for r in rows})
+        chosen_meetings = st.multiselect("Meeting", meeting_titles, placeholder="All meetings")
+        sort_by = st.selectbox("Sort by", ["Due date", "Newest meeting", "Owner"])
+
+    allowed = DUE_FILTERS[due_filter]
     shown = [
         r
         for r in rows
-        if (not needle or needle in r["Task"].casefold() or needle in r["Meeting"].casefold())
-        and (not chosen_owners or r["Owner"] in chosen_owners)
+        if (view == "All" or (view == "Done") == r["done"])
+        and (allowed is None or minutes_store.due_bucket({**r, "done": False}, today) in allowed)
+        and (not chosen_owners or r["owner"] in chosen_owners)
+        and (not chosen_meetings or meeting_title(r["meeting"]) in chosen_meetings)
+        and (not needle or needle in r["task"].casefold() or needle in meeting_title(r["meeting"]).casefold())
     ]
-    for row in shown:
-        with st.container(border=True):
-            st.markdown(f"**{row['Task']}**")
-            st.caption(f"Owner: {row['Owner']} · Deadline: {row['Deadline']} · {row['Meeting']} ({row['Date']})")
-
-    buffer = io.StringIO()
-    writer = csv.DictWriter(buffer, fieldnames=list(rows[0]))
-    writer.writeheader()
-    writer.writerows(shown)
-    st.download_button(
-        "Export CSV",
-        data=buffer.getvalue(),
-        file_name="action_items.csv",
-        mime="text/csv",
-        icon=":material/download:",
+    newest_first = sorted(
+        shown,
+        key=lambda r: parse_when(r["meeting"]["recorded_at"]) or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
     )
+    if sort_by == "Due date":
+        shown = sorted(newest_first, key=lambda r: (r["due"] is None, r["due"] or datetime.max.date()))
+    elif sort_by == "Owner":
+        shown = sorted(newest_first, key=lambda r: r["owner"].casefold())
+    else:
+        shown = newest_first
+
+    if not shown:
+        st.info("Nothing here. Change the filters, or switch the view to All.")
+    st.caption(f"{len(shown)} of {len(rows)} tasks")
+    for row in shown:
+        task_card(row, today)
+
+    export = [
+        {
+            "Task": r["task"],
+            "Status": "Done" if r["done"] else "Open",
+            "Owner": r["owner"],
+            "Due": r["due"].isoformat() if r["due"] else "",
+            "Said in meeting": r["deadline"],
+            "Meeting": meeting_title(r["meeting"]),
+            "Date": when_full(r["meeting"]["recorded_at"]),
+        }
+        for r in shown
+    ]
+    if export:
+        buffer = io.StringIO()
+        writer = csv.DictWriter(buffer, fieldnames=list(export[0]))
+        writer.writeheader()
+        writer.writerows(export)
+        st.download_button(
+            "Export CSV",
+            data=buffer.getvalue(),
+            file_name="action_items.csv",
+            mime="text/csv",
+            icon=":material/download:",
+        )
 
 
 def ollama_target_label(host):
@@ -1093,7 +1319,7 @@ def settings_page():
 PAGE_DASHBOARD = st.Page(dashboard_page, title="Dashboard", icon=":material/dashboard:", url_path="dashboard", default=True)
 PAGE_MEETINGS = st.Page(meetings_page, title="My Meetings", icon=":material/event_note:", url_path="meetings")
 PAGE_CHAT = st.Page(chat_page, title="Ask AI", icon=":material/chat:", url_path="chat")
-PAGE_ACTIONS = st.Page(actions_page, title="Action Items", icon=":material/task_alt:", url_path="actions")
+PAGE_ACTIONS = st.Page(actions_page, title="Task board", icon=":material/task_alt:", url_path="actions")
 PAGE_SETTINGS = st.Page(settings_page, title="Settings", icon=":material/settings:", url_path="settings")
 
 HOVER_CSS = """
