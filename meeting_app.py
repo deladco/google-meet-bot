@@ -443,6 +443,15 @@ def new_meeting_section():
         default="Send AI bot to a meeting",
         key="audio_source",
     )
+    bot_mode = audio_source == "Send AI bot to a meeting"
+    bot_url = ""
+    if bot_mode:
+        bot_url = st.text_input(
+            "Meeting link",
+            placeholder="Paste your Google Meet, Zoom or Teams link",
+            key="bot_meeting_link",
+            label_visibility="collapsed",
+        )
     consent_confirmed = st.checkbox(
         "I have consent to record and transcribe this meeting."
     )
@@ -484,23 +493,33 @@ def new_meeting_section():
         if not (meeting_bot.is_configured() and st.session_state.get("supabase_user")):
             st.info("Sign in with Supabase to send the bot to a meeting.")
             return
-        bot_url = st.text_input("Meeting link", placeholder="https://meet.google.com/abc-defg-hij")
-        bot_name = st.text_input("Bot name", value="AI Assistant")
+        bot_url = bot_url.strip()
+        with st.expander("Bot options"):
+            bot_name = st.text_input("Bot name", value="AI Assistant")
+        link_ok = bot_url.lower().startswith(("http://", "https://")) and any(
+            host in bot_url.lower() for host in ("meet.google.", "zoom.", "teams.")
+        )
+        if bot_url and not link_ok:
+            st.warning("That doesn't look like a Google Meet, Zoom or Teams link.")
         if st.button(
             "Send bot to meeting",
             type="primary",
             icon=":material/smart_toy:",
-            disabled=not (consent_confirmed and bot_url.strip()),
+            disabled=not bot_url,
+            width="stretch",
+            key="send_bot",
         ):
-            try:
-                st.session_state["active_bot_id"] = meeting_bot.join_meeting(
-                    auth_db.client_for_user(), bot_url, bot_name, viewer_email
-                )
-            except Exception as error:
-                st.error(f"Could not queue the bot: {error}")
-        if not consent_confirmed:
-            st.info("Confirm recording consent above to send the bot.")
-
+            if not consent_confirmed:
+                st.error("Tick the consent box above first, so everyone in the meeting is covered.")
+            elif not link_ok:
+                st.error("Paste a full Google Meet, Zoom or Teams link first.")
+            else:
+                try:
+                    st.session_state["active_bot_id"] = meeting_bot.join_meeting(
+                        auth_db.client_for_user(), bot_url, bot_name, viewer_email
+                    )
+                except Exception as error:
+                    st.error(f"Could not queue the bot: {error}")
         bot_id = st.session_state.get("active_bot_id")
         if bot_id:
             try:
@@ -622,7 +641,9 @@ def dashboard_page():
     hours = sum(meeting_duration_hours(m) for m in meetings)
 
     st.title("Meet AI!")
-    with st.expander("New meeting: send the bot, record or upload", icon=":material/add_circle:"):
+    with st.container(border=True, key="new_meeting"):
+        st.subheader("Start a new meeting", anchor=False)
+        st.caption("Paste a meeting link and the AI joins, records and writes your notes. Or record or upload audio.")
         new_meeting_section()
 
     metric_columns = st.columns(3)
@@ -1093,6 +1114,17 @@ label:has(input[type="checkbox"]) { transition: background-color .15s ease, bord
 label:has(input[type="checkbox"]):hover { color: #B8B8FF; }
 [data-testid="stBaseButton-pills"]:hover, [data-testid="stBaseButton-segmented_control"]:hover {
   background-color: #2B2F45; border-color: #7C7CF0;
+}
+.st-key-new_meeting {
+  border: 1px solid #7C7CF0 !important;
+  background: linear-gradient(135deg, #1E2130 0%, #23264A 100%);
+  padding: 1.25rem 1.5rem;
+}
+.st-key-new_meeting [data-testid="stTextInput"] input {
+  font-size: 1.15rem; min-height: 3.4rem; padding-left: 1rem;
+}
+.st-key-new_meeting .stButton > button[kind="primary"] {
+  min-height: 3.4rem; font-size: 1.1rem; font-weight: 600;
 }
 @media (max-width: 640px) {
   .block-container { padding: 3.5rem 1rem 5rem; }
