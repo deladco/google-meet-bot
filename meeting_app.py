@@ -962,6 +962,29 @@ PAGE_CHAT = st.Page(chat_page, title="AI Chat", icon=":material/chat:", url_path
 PAGE_ACTIONS = st.Page(actions_page, title="Action Items", icon=":material/task_alt:", url_path="actions")
 PAGE_SETTINGS = st.Page(settings_page, title="Settings", icon=":material/settings:", url_path="settings")
 
+HOVER_CSS = """
+<style>
+button, summary, [role="tab"], [data-baseweb="select"] > div, [data-testid="stSidebarNavLink"],
+label:has(input[type="checkbox"]) { transition: background-color .15s ease, border-color .15s ease, color .15s ease; }
+.stButton > button:hover, .stDownloadButton > button:hover, .stFormSubmitButton > button:hover {
+  background-color: #2B2F45; border-color: #7C7CF0; color: #FFFFFF;
+}
+.stButton > button[kind="primary"]:hover, .stFormSubmitButton > button[kind="primary"]:hover {
+  background-color: #9494F5; border-color: #9494F5;
+}
+.stButton > button[kind="tertiary"]:hover { background-color: rgba(124,124,240,.16); color: #B8B8FF; }
+[data-testid="stExpander"] summary:hover { background-color: #262A3E; }
+[role="tab"]:hover { background-color: rgba(124,124,240,.14); color: #B8B8FF; }
+[data-baseweb="select"] > div:hover, [data-baseweb="input"]:hover { border-color: #7C7CF0; background-color: #262A3E; }
+[data-testid="stSidebarNavLink"]:hover { background-color: rgba(124,124,240,.18); }
+label:has(input[type="checkbox"]):hover { color: #B8B8FF; }
+[data-testid="stBaseButton-pills"]:hover, [data-testid="stBaseButton-segmented_control"]:hover {
+  background-color: #2B2F45; border-color: #7C7CF0;
+}
+</style>
+"""
+st.markdown(HOVER_CSS, unsafe_allow_html=True)
+
 navigation = st.navigation([PAGE_DASHBOARD, PAGE_MEETINGS, PAGE_CHAT, PAGE_ACTIONS, PAGE_SETTINGS])
 with st.sidebar:
     st.caption(f"Signed in as {st.session_state['supabase_user']}" if st.session_state.get("supabase_user") else "")
