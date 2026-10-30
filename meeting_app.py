@@ -552,6 +552,9 @@ def dashboard_page():
     hours = sum(meeting_duration_hours(m) for m in meetings)
 
     st.title("Meeting Intelligence")
+    with st.expander("New meeting: send the bot, record or upload", icon=":material/add_circle:"):
+        new_meeting_section()
+
     metric_columns = st.columns(3)
     metric_columns[0].metric("Meetings", len(meetings), border=True)
     metric_columns[1].metric("Action items", len(actions), border=True)
@@ -593,9 +596,6 @@ def dashboard_page():
                 st.session_state["pending_question"] = quick_question.strip()
                 st.switch_page(PAGE_CHAT)
             st.caption("Answers grounded in your private transcripts")
-
-    with st.expander("New meeting: send the bot, record or upload", icon=":material/add_circle:"):
-        new_meeting_section()
 
 
 def meetings_page():
