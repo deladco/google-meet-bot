@@ -30,12 +30,13 @@ from transcript_quality import LEARNED_FILE, vocabulary
 PROJECT_DIR = Path(__file__).resolve().parent
 VOCABULARY_FILE = PROJECT_DIR / "vocabulary.txt"
 LANGUAGES = {"Auto-detect": None, "English": "en", "Ukrainian": "uk", "Russian": "ru"}
+LOGO_FILE = PROJECT_DIR / "assets" / "logo.png"
 MEETINGS_CACHE_SECONDS = 45
 
 load_dotenv(dotenv_path=PROJECT_DIR / ".env")
 st.set_page_config(
-    page_title="Meeting Intelligence",
-    page_icon=":material/graphic_eq:",
+    page_title="Meet AI!",
+    page_icon=str(Path(__file__).resolve().parent / "assets" / "favicon.png"),
     layout="wide",
 )
 
@@ -92,7 +93,9 @@ LANDING_STEPS = [
 
 
 def landing_intro():
-    st.markdown("# Meeting Intelligence")
+    logo_column, name_column = st.columns([1, 5], vertical_alignment="center")
+    logo_column.image(str(LOGO_FILE), width=88)
+    name_column.markdown("# Meet AI!")
     st.markdown("### Turn every meeting into clear notes, decisions and tasks.")
     st.write(
         "An AI assistant that joins your calls, writes down what was said in "
@@ -618,7 +621,7 @@ def dashboard_page():
     actions = [a for m in meetings for a in minutes_list(m, "action_items")]
     hours = sum(meeting_duration_hours(m) for m in meetings)
 
-    st.title("Meeting Intelligence")
+    st.title("Meet AI!")
     with st.expander("New meeting: send the bot, record or upload", icon=":material/add_circle:"):
         new_meeting_section()
 
@@ -1102,6 +1105,7 @@ label:has(input[type="checkbox"]):hover { color: #B8B8FF; }
 """
 st.markdown(HOVER_CSS, unsafe_allow_html=True)
 
+st.logo(str(LOGO_FILE), size="large")
 navigation = st.navigation([PAGE_DASHBOARD, PAGE_MEETINGS, PAGE_CHAT, PAGE_ACTIONS, PAGE_SETTINGS])
 with st.sidebar:
     st.caption(f"Signed in as {st.session_state['supabase_user']}" if st.session_state.get("supabase_user") else "")
