@@ -30,3 +30,6 @@ dist/
 *.egg-info/
 
 bot_google_state.json
+
+vocabulary_learned.txt
+vocabulary_candidates.json

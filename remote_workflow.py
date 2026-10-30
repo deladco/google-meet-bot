@@ -21,7 +21,7 @@ from ai_agent import (
 )
 from meeting_history import MeetingHistory
 from remote_config import get_setting
-from transcript_quality import clean_audio, correct_transcript, vocabulary
+from transcript_quality import clean_audio, correct_transcript, learn_vocabulary, vocabulary
 
 PROJECT_DIR = Path(__file__).resolve().parent
 load_dotenv(dotenv_path=PROJECT_DIR / ".env")
@@ -316,6 +316,8 @@ def process_uploaded_recording(
         if corrected_count:
             _write_jsonl(transcript_path, entries)
             history.index_file(session_id, "transcript", transcript_path)
+
+        learn_vocabulary(entries, session_id)
 
         conversation = "\n".join(
             f"[{index}] {entry.get('timestamp', '')} "

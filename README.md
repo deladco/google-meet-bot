@@ -62,3 +62,5 @@ Never commit `.env`, OAuth credentials, tokens, virtual environments, databases,
 ## Transcription quality
 
 On an NVIDIA GPU the worker uses Whisper large-v3-turbo (CPU hosts: small), detects the language per segment, cleans the audio (high-pass, plus noise reduction if `noisereduce` is installed), biases Whisper toward your vocabulary, and runs an Ollama pass that fixes obvious misspellings. Tune it with the optional variables in `.env.example` (`WHISPER_MODEL`, `WHISPER_LANGUAGE`, `WHISPER_VOCABULARY` / `vocabulary.txt`, `AUDIO_CLEANUP`, `TRANSCRIPT_LLM_CORRECTION`). GPU hosts also need `nvidia-cublas-cu12 nvidia-cudnn-cu12` and a CUDA build of torch for fast speaker labelling.
+
+Vocabulary is learned automatically: after each meeting, names and terms found in the transcript become candidates (`vocabulary_candidates.json`) and are promoted to `vocabulary_learned.txt` once they appear in two different meetings. Edit that file freely, or move good terms into `vocabulary.txt`.
