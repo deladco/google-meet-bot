@@ -21,6 +21,7 @@ from ai_agent import (
 )
 from meeting_history import MeetingHistory
 from remote_config import get_setting
+from transcript_quality import clean_audio, correct_transcript, vocabulary
 
 PROJECT_DIR = Path(__file__).resolve().parent
 load_dotenv(dotenv_path=PROJECT_DIR / ".env")
@@ -158,9 +159,11 @@ def _transcribe_samples(whisper, samples, meeting_time, vad_filter):
 
 def _transcribe_once(whisper, samples, meeting_time, vad_filter):
     language = os.getenv("WHISPER_LANGUAGE") or None
+    terms = vocabulary()
     segments, _ = whisper.transcribe(
         _normalize_level(samples),
         beam_size=5,
+        hotwords=", ".join(terms) or None,
         language=language,
         # Without a fixed language, detect it per segment so mixed English/Ukrainian/Russian speech works.
         multilingual=language is None,
@@ -232,6 +235,8 @@ def process_uploaded_recording(
                 raise ValueError("No decodable audio was found in the upload.")
 
             whisper = _whisper_model()
+            diarization_samples = samples
+            samples = clean_audio(samples)
             entries = _transcribe_samples(
                 whisper,
                 samples,
@@ -283,7 +288,7 @@ def process_uploaded_recording(
             if hf_token:
                 try:
                     wav_path = Path(temp_dir) / "diarization.wav"
-                    _write_pcm_wav(wav_path, samples, SAMPLE_RATE)
+                    _write_pcm_wav(wav_path, diarization_samples, SAMPLE_RATE)
                     _diarize_in_subprocess(wav_path, transcript_path, hf_token)
                     entries = [
                         json.loads(line)
@@ -305,6 +310,12 @@ def process_uploaded_recording(
                     "diarization_unavailable",
                     error="HF_TOKEN is not configured; speakers remain Unknown.",
                 )
+
+        history.update_status(session_id, "correcting")
+        entries, corrected_count = correct_transcript(entries)
+        if corrected_count:
+            _write_jsonl(transcript_path, entries)
+            history.index_file(session_id, "transcript", transcript_path)
 
         conversation = "\n".join(
             f"[{index}] {entry.get('timestamp', '')} "

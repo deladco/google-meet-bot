@@ -58,3 +58,7 @@ python meeting_history.py ask "Which tasks were assigned last week?"
 `controller.py` and `live_transcriber.py` remain available for local desktop capture. They use the host machine's audio devices and are not used by the remote upload dashboard.
 
 Never commit `.env`, OAuth credentials, tokens, virtual environments, databases, recordings, transcripts, or meeting notes. Those paths are excluded by `.gitignore` and `.dockerignore`.
+
+## Transcription quality
+
+On an NVIDIA GPU the worker uses Whisper large-v3-turbo (CPU hosts: small), detects the language per segment, cleans the audio (high-pass, plus noise reduction if `noisereduce` is installed), biases Whisper toward your vocabulary, and runs an Ollama pass that fixes obvious misspellings. Tune it with the optional variables in `.env.example` (`WHISPER_MODEL`, `WHISPER_LANGUAGE`, `WHISPER_VOCABULARY` / `vocabulary.txt`, `AUDIO_CLEANUP`, `TRANSCRIPT_LLM_CORRECTION`). GPU hosts also need `nvidia-cublas-cu12 nvidia-cudnn-cu12` and a CUDA build of torch for fast speaker labelling.
