@@ -54,30 +54,82 @@ def require_password():
     )
     if st.session_state.get("authenticated"):
         return
-    st.title("AI Assistant")
-    if not expected:
-        st.error(
-            "Access is locked: no password is configured. Set `Password` in .env "
-            "or in the Streamlit app secrets."
-        )
-        st.stop()
-    with st.form("login"):
-        entered = st.text_input("Password", type="password")
-        submitted = st.form_submit_button("Unlock", type="primary")
-    if submitted:
-        if hmac.compare_digest(entered.encode(), expected.encode()):
-            st.session_state["authenticated"] = True
-            st.rerun()
-        st.error("Incorrect password.")
+    intro_column, form_column = st.columns([3, 2], gap="large")
+    with intro_column:
+        landing_intro()
+    with form_column:
+        if not expected:
+            st.error(
+                "Access is locked: no password is configured. Set `Password` in .env "
+                "or in the Streamlit app secrets."
+            )
+        else:
+            with st.form("login"):
+                entered = st.text_input("Password", type="password")
+                submitted = st.form_submit_button("Unlock", type="primary")
+            if submitted:
+                if hmac.compare_digest(entered.encode(), expected.encode()):
+                    st.session_state["authenticated"] = True
+                    st.rerun()
+                st.error("Incorrect password.")
+    landing_details()
     st.stop()
+
+
+LANDING_FEATURES = [
+    (":material/smart_toy:", "Joins for you", "Send the bot to a Google Meet, Zoom or Teams call, or record and upload audio yourself."),
+    (":material/translate:", "English, Ukrainian, Russian", "Speech is transcribed in the language spoken, even when people switch mid-meeting."),
+    (":material/groups:", "Knows who spoke", "Every line is attributed to a speaker, so the notes read like a real conversation."),
+    (":material/task_alt:", "Summary and action items", "Get decisions, tasks with owners and deadlines, and open questions in minutes."),
+    (":material/chat:", "Ask AI", "Ask \"What did we decide about the launch?\" and get answers with sources from your own meetings."),
+    (":material/lock:", "Private by default", "Your meetings are visible only to your account, and recording needs explicit consent."),
+]
+LANDING_STEPS = [
+    ("1. Add a meeting", "Paste a meeting link for the bot, or upload a recording."),
+    ("2. Let it work", "It transcribes, identifies speakers and writes the summary."),
+    ("3. Follow up", "Review decisions and tasks, or just ask the AI."),
+]
+
+
+def landing_intro():
+    st.markdown("# Meeting Intelligence")
+    st.markdown("### Turn every meeting into clear notes, decisions and tasks.")
+    st.write(
+        "An AI assistant that joins your calls, writes down what was said in "
+        "English, Ukrainian or Russian, and answers questions about it later."
+    )
+
+
+def landing_details():
+    st.divider()
+    st.subheader("What it does")
+    for row_start in range(0, len(LANDING_FEATURES), 3):
+        for column, (icon, title, text) in zip(st.columns(3), LANDING_FEATURES[row_start : row_start + 3]):
+            with column.container(border=True, height=190):
+                st.markdown(f"#### {icon} {title}")
+                st.caption(text)
+    st.subheader("How it works")
+    for column, (title, text) in zip(st.columns(3), LANDING_STEPS):
+        column.markdown(f"**{title}**")
+        column.caption(text)
+    st.caption("Create a free account above to try it. Recording requires the consent of everyone in the meeting.")
 
 
 def require_login():
     if st.session_state.get("supabase_user"):
         return
-    st.title("AI Assistant")
     client = auth_db.new_client()
-    sign_in_tab, sign_up_tab = st.tabs(["Sign in", "Create account"])
+    intro_column, form_column = st.columns([3, 2], gap="large")
+    with intro_column:
+        landing_intro()
+    with form_column:
+        sign_in_tab, sign_up_tab = st.tabs(["Sign in", "Create account"])
+        _login_forms(client, sign_in_tab, sign_up_tab)
+    landing_details()
+    st.stop()
+
+
+def _login_forms(client, sign_in_tab, sign_up_tab):
     with sign_in_tab, st.form("supabase_sign_in"):
         email = st.text_input("Email")
         password = st.text_input("Password", type="password")
@@ -101,7 +153,6 @@ def require_login():
                     auth_db.save_login(response)
                     st.rerun()
                 st.success("Account created. Confirm the email we sent, then sign in.")
-    st.stop()
 
 
 if auth_db.is_configured():
