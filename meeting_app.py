@@ -30,7 +30,7 @@ from transcript_quality import LEARNED_FILE, vocabulary
 PROJECT_DIR = Path(__file__).resolve().parent
 VOCABULARY_FILE = PROJECT_DIR / "vocabulary.txt"
 LANGUAGES = {"Auto-detect": None, "English": "en", "Ukrainian": "uk", "Russian": "ru"}
-LOGO_FILE = PROJECT_DIR / "assets" / "logo.png"
+LOGO_FILE = PROJECT_DIR / "assets" / "logo.svg"
 MEETINGS_CACHE_SECONDS = 45
 
 load_dotenv(dotenv_path=PROJECT_DIR / ".env")
