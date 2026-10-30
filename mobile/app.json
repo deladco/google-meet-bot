@@ -1,0 +1,41 @@
+{
+  "expo": {
+    "name": "Meet AI!",
+    "slug": "meet-ai",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "scheme": "meetai",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#14161F"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.example.meetai",
+      "buildNumber": "1",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.example.meetai",
+      "adaptiveIcon": {
+        "backgroundColor": "#14161F",
+        "foregroundImage": "./assets/android-icon-foreground.png"
+      },
+      "permissions": ["RECORD_AUDIO"]
+    },
+    "plugins": [
+      "expo-secure-store",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Meet AI! uses the microphone only when you tap Start recording, to turn a conversation you record into notes and action items."
+        }
+      ]
+    ]
+  }
+}

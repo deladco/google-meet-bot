@@ -34,6 +34,8 @@ from remote_workflow import process_uploaded_recording
 
 SAMPLE_RATE = 16000
 POLL_SECONDS = 10
+AUDIO_TABLE = "audio_jobs"
+AUDIO_BUCKET = "recordings"
 MAX_MINUTES = int(os.environ.get("BOT_MAX_MINUTES", "180"))
 LOBBY_MINUTES = int(os.environ.get("BOT_LOBBY_MINUTES", "10"))
 HEADLESS = os.environ.get("BOT_HEADLESS", "0" if sys.platform == "win32" else "1") == "1"
@@ -62,6 +64,11 @@ def service_client():
 def set_job(db, job_id, **fields):
     fields["updated_at"] = datetime.now(timezone.utc).isoformat()
     db.table(meeting_bot.JOBS_TABLE).update(fields).eq("id", job_id).execute()
+
+
+def set_audio_job(db, job_id, **fields):
+    fields["updated_at"] = datetime.now(timezone.utc).isoformat()
+    db.table(AUDIO_TABLE).update(fields).eq("id", job_id).execute()
 
 
 def job_status(db, job_id):
@@ -361,10 +368,77 @@ def run_job(db, job):
             message=result.get("error"))
 
 
+def convert_to_wav(source, target):
+    """Phone recordings are usually .m4a/.caf; decode them with PyAV to 16 kHz mono WAV."""
+    import numpy as np
+    from faster_whisper.audio import decode_audio
+
+    samples = decode_audio(str(source), sampling_rate=SAMPLE_RATE)
+    pcm = (np.clip(samples, -1, 1) * 32767).astype("<i2")
+    with wave.open(str(target), "wb") as out:
+        out.setnchannels(1)
+        out.setsampwidth(2)
+        out.setframerate(SAMPLE_RATE)
+        out.writeframes(pcm.tobytes())
+
+
+def run_audio_job(db, job):
+    """Transcribe a recording uploaded from the mobile app."""
+    set_audio_job(db, job["id"], status="processing")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        raw_path = Path(temp_dir) / "upload"
+        raw_path.write_bytes(db.storage.from_(AUDIO_BUCKET).download(job["storage_path"]))
+        wav_path = Path(temp_dir) / "recording.wav"
+        convert_to_wav(raw_path, wav_path)
+        if wav_path.stat().st_size < 10_000:
+            raise RuntimeError("The recording is empty or too short.")
+        result = process_uploaded_recording(
+            wav_path.read_bytes(),
+            "mobile-recording.wav",
+            consent_confirmed=True,
+            owner_id=job["user_id"],
+            owner_email=job.get("user_email"),
+            language=job.get("language") or None,
+        )
+    saved = next(
+        (m for m in MeetingHistory().list_meetings(limit=50) if m["meeting_id"] == result["meeting_id"]),
+        None,
+    )
+    if not saved:
+        raise RuntimeError("The recording was processed but could not be found in history.")
+    auth_db.save_meeting_from_history(db, saved, owner_email=job.get("user_email"), user_id=job["user_id"])
+    set_audio_job(db, job["id"], status="done", meeting_id=result["meeting_id"], message=result.get("error"))
+    try:
+        db.storage.from_(AUDIO_BUCKET).remove([job["storage_path"]])  # keep no audio after transcription
+    except Exception:
+        pass
+
+
+def poll_audio_jobs(db):
+    try:
+        jobs = (
+            db.table(AUDIO_TABLE).select("*").eq("status", "queued").order("created_at").limit(1).execute().data
+        )
+    except Exception:
+        return False  # table not created yet
+    if not jobs:
+        return False
+    job = jobs[0]
+    print("Starting audio job", job["id"])
+    try:
+        run_audio_job(db, job)
+    except Exception as error:
+        print("Audio job failed:", error)
+        set_audio_job(db, job["id"], status="failed", message=str(error)[:500])
+    return True
+
+
 def main():
     db = service_client()
     print(f"Bot worker running (headless={HEADLESS}). Waiting for jobs...")
     while True:
+        if poll_audio_jobs(db):
+            continue
         try:
             jobs = (
                 db.table(meeting_bot.JOBS_TABLE)
