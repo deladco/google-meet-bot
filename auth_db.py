@@ -121,6 +121,16 @@ def save_meeting_from_history(client, meeting, owner_email=None, user_id=None):
     if user_id:
         row["user_id"] = user_id
     try:
-        return upsert_meeting(client, {**row, "owner_email": owner_email})
+        saved = upsert_meeting(client, {**row, "owner_email": owner_email})
     except Exception:
-        return upsert_meeting(client, row)
+        saved = upsert_meeting(client, row)
+    try:
+        import rag
+
+        rag.index_meeting(
+            client, row["meeting_id"], row["recorded_at"],
+            row["transcript"], row["notes"], user_id=user_id,
+        )
+    except Exception:
+        pass  # search index is optional; Ask re-indexes anything missing
+    return saved

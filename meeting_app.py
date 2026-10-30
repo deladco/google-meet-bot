@@ -22,6 +22,7 @@ from remote_config import (
 )
 from remote_workflow import process_uploaded_recording
 import meeting_bot
+import rag
 from tab_recorder import tab_recorder
 
 st.set_page_config(page_title="AI Assistant", layout="wide")
@@ -632,15 +633,41 @@ with search_tab:
                     st.write(result["excerpt"])
 
 with ask_tab:
+    cloud_ready = auth_db.is_configured() and bool(st.session_state.get("supabase_user"))
     question = st.text_input(
         "Ask about decisions, assigned tasks, deadlines, or open questions",
-        placeholder="Which tasks were assigned last week?",
+        placeholder="What decisions did we make about the product launch?",
     )
+    if cloud_ready:
+        st.caption(
+            "Searches only your own saved meetings (transcripts and notes) and cites the sources. "
+            "Try: *What deadlines were discussed last week?*"
+        )
     if st.button("Ask", key="ask_button", disabled=not question.strip()):
         try:
-            with st.spinner("Searching meeting history and asking Ollama..."):
-                answer = history.answer(question, limit=5, owner_id=scope_owner_id)
+            with st.spinner("Searching your meetings and asking Ollama..."):
+                if cloud_ready:
+                    cloud_db = auth_db.client_for_user()
+                    rag.index_missing(cloud_db)
+                    answer, passages = rag.answer_question(cloud_db, question)
+                else:
+                    answer = history.answer(question, limit=5, owner_id=scope_owner_id)
+                    passages = []
         except Exception as error:
-            st.error(f"Could not answer from local history: {error}")
+            if "meeting_chunks" in str(error) or "search_meeting_chunks" in str(error):
+                st.error(
+                    "The search index is not set up yet. Run supabase_migration_rag.sql "
+                    "in the Supabase SQL Editor."
+                )
+            else:
+                st.error(f"Could not answer: {error}")
         else:
             st.markdown(answer)
+            if passages:
+                with st.expander(f"Sources ({len(passages)})"):
+                    for number, passage in enumerate(passages, start=1):
+                        st.markdown(
+                            f"**[{number}]** `{passage['meeting_id']}` · "
+                            f"{str(passage.get('recorded_at') or '')[:16]} · {passage['kind']}"
+                        )
+                        st.text(passage["content"][:600])
