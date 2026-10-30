@@ -240,15 +240,20 @@ def page_text(page):
 
 
 def denied_reason(page):
-    body = page_text(page).lower()
-    if any(text.lower() in body for text in DENIED_TEXTS):
-        hint = (
-            "Run `python bot_login.py` once to sign the bot in to a Google account."
-            if not STATE_FILE.exists()
-            else "The bot's Google account was not allowed in; invite it to the meeting."
-        )
-        return f"The meeting refused the bot ({hint})"
-    return None
+    body = page_text(page).lower().replace("’", "'")
+    if not any(text.lower().replace("’", "'") in body for text in DENIED_TEXTS):
+        return None
+    if "no one responded" in body:
+        return "Nobody in the meeting admitted the bot in time. Keep the meeting open and admit 'AI Assistant' when it asks to join."
+    if "denied" in body:
+        return "The host denied the bot's request to join. Send the bot again and admit it from the meeting."
+    if not STATE_FILE.exists():
+        return "The meeting only allows signed-in guests. Run `python bot_login.py` once to sign the bot in to a Google account."
+    return (
+        "The meeting only allows invited accounts (or the host disabled anonymous joining). "
+        "Invite the bot's Google account to the calendar event or add it as a participant, "
+        "or ask the host to allow everyone with the link."
+    )
 
 
 def in_lobby(page):
