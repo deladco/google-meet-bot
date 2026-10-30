@@ -432,6 +432,67 @@ def show_processing_result(result):
     show_saved_transcript(result)
 
 
+BOT_STEPS = ["queued", "joining", "recording", "transcribing", "summarizing", "done"]
+
+
+def render_bot_status():
+    """Shows the signed-in user's own bot job. Every query goes through their RLS-scoped client."""
+    try:
+        db = auth_db.client_for_user()
+        bot_id = st.session_state.get("active_bot_id")
+        job = meeting_bot.get_job(db, bot_id) if bot_id else meeting_bot.latest_job(db)
+        if job is None or (not bot_id and not meeting_bot.is_active(job["status"])):
+            return False
+        st.session_state["active_bot_id"] = job["id"]
+        code = job["status"]
+        step = {"stop_requested": "recording", "processing": "transcribing"}.get(code, code)
+        if code in meeting_bot.FAILED:
+            st.error(f"{meeting_bot.describe_status(code)}. {job.get('message') or ''}".strip())
+            return False
+        if step in BOT_STEPS:
+            st.progress(BOT_STEPS.index(step) / (len(BOT_STEPS) - 1), text=meeting_bot.describe_status(code))
+        else:
+            st.write(f"**Bot status:** {meeting_bot.describe_status(code)}")
+        if code == "queued":
+            st.caption(
+                "The bot worker (`python bot_worker.py`) must be running on a computer with "
+                "access to the meeting's audio to pick this up."
+            )
+        if job.get("message"):
+            st.caption(job["message"])
+        if code in meeting_bot.FINISHED:
+            return False
+        if code in meeting_bot.STOPPABLE and st.button(
+            "Make the bot leave now", key=f"leave_{job['id']}", width="stretch"
+        ):
+            meeting_bot.leave_meeting(db, job["id"])
+            st.rerun(scope="fragment")
+        return True
+    except Exception as error:
+        st.error(f"Bot error: {error}")
+        return False
+
+
+def bot_status_panel():
+    """Polls the job every 2 s without rerunning the dashboard; the whole page refreshes once when it ends."""
+    was_active = st.session_state.get("bot_panel_active", False)
+
+    @st.fragment(run_every="2s" if was_active else None)
+    def panel():
+        active = render_bot_status()
+        if active != st.session_state.get("bot_panel_active", False):
+            st.session_state["bot_panel_active"] = active
+            if not active and st.session_state.get("active_bot_id"):
+                refresh_meetings()
+            st.rerun()
+
+    panel()
+    if not st.session_state.get("bot_panel_active", False) and st.session_state.get("active_bot_id"):
+        job = meeting_bot.get_job(auth_db.client_for_user(), st.session_state["active_bot_id"])
+        if job and job["status"] in meeting_bot.FINISHED:
+            st.success("Finished. Open **My Meetings** to read the notes and transcript.")
+
+
 def new_meeting_section():
     audio_source = st.segmented_control(
         "Recording source",
@@ -521,31 +582,7 @@ def new_meeting_section():
                     )
                 except Exception as error:
                     st.error(f"Could not queue the bot: {error}")
-        bot_id = st.session_state.get("active_bot_id")
-        if bot_id:
-            try:
-                db = auth_db.client_for_user()
-                job = meeting_bot.get_job(db, bot_id)
-                code = job["status"] if job else "cancelled"
-                st.write(f"**Bot status:** {meeting_bot.describe_status(code)}")
-                if code == "queued":
-                    st.caption(
-                        "The bot worker (`python bot_worker.py`) must be running on a computer "
-                        "or server to pick this up."
-                    )
-                if job and job.get("message"):
-                    st.caption(job["message"])
-                if code in meeting_bot.FINISHED:
-                    refresh_meetings()
-                    st.success("Finished. Open **My Meetings** to read the notes and transcript.")
-                elif code not in meeting_bot.FAILED:
-                    left_col, right_col = st.columns(2)
-                    left_col.button("Refresh status")
-                    if right_col.button("Make the bot leave now"):
-                        meeting_bot.leave_meeting(db, bot_id)
-                        st.rerun()
-            except Exception as error:
-                st.error(f"Bot error: {error}")
+        bot_status_panel()
     elif audio_source == "Tabs / system audio + microphone":
         st.caption(
             "Records the other participants together with your microphone. Click Start, then in the "

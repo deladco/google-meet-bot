@@ -347,12 +347,22 @@ def run_job(db, job):
         shutil.copyfile(wav_path, keep)  # listen to this if a meeting comes back empty
 
         set_job(db, job["id"], status="processing")
+        current = {"status": "processing"}
+
+        def on_progress(message):
+            # Writing a step to the job lets the app show transcribing vs summarizing.
+            status = "summarizing" if message.startswith(("Writing", "Saving")) else "transcribing"
+            if status != current["status"]:
+                current["status"] = status
+                set_job(db, job["id"], status=status, message=None)
+
         result = process_uploaded_recording(
             wav_path.read_bytes(),
             "bot-recording.wav",
             consent_confirmed=True,
             owner_id=job["user_id"],
             owner_email=job.get("user_email"),
+            progress=on_progress,
         )
 
     saved = next(

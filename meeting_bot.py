@@ -13,12 +13,16 @@ SUPPORTED_HOSTS = (
 )
 FINISHED = {"done"}
 FAILED = {"failed", "cancelled"}
+STOPPABLE = {"queued", "joining", "recording"}
+# No job at all is the "idle" state; "done" is the completed state.
 STATUS_LABELS = {
     "queued": "Waiting for the bot worker to pick this up",
     "joining": "Joining the meeting (admit the bot if it is in the lobby)",
     "recording": "In the meeting and recording",
     "stop_requested": "Asked to leave, finishing up",
-    "processing": "Meeting ended, transcribing and writing minutes",
+    "processing": "Meeting ended, getting ready to transcribe",
+    "transcribing": "Transcribing the recording",
+    "summarizing": "Writing the summary and action items",
     "done": "Done - the meeting is in your history",
     "failed": "The bot failed",
     "cancelled": "Cancelled",
@@ -63,9 +67,30 @@ def get_job(client, job_id):
     return rows[0] if rows else None
 
 
+def latest_job(client, max_age_hours=12):
+    """The signed-in user's newest job (row-level security limits it to their own), if recent."""
+    from datetime import datetime, timedelta, timezone
+
+    since = (datetime.now(timezone.utc) - timedelta(hours=max_age_hours)).isoformat()
+    rows = (
+        client.table(JOBS_TABLE)
+        .select("*")
+        .gte("created_at", since)
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+        .data
+    )
+    return rows[0] if rows else None
+
+
+def is_active(status):
+    return status not in FINISHED and status not in FAILED
+
+
 def leave_meeting(client, job_id):
     client.table(JOBS_TABLE).update({"status": "stop_requested"}).eq("id", job_id).in_(
-        "status", ["queued", "joining", "recording"]
+        "status", sorted(STOPPABLE)
     ).execute()
 
 
