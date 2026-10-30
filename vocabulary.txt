@@ -1,0 +1,19 @@
+# Names and terms Whisper and the correction pass should spell exactly. One per line; lines starting with # are ignored.
+Python
+JavaScript
+HTML
+GitHub Copilot
+Claude
+PyTorch
+MCP
+API
+Jira
+Scrum
+Power Automate
+low-code
+Senior Associate Clinical Capabilities
+VinVinTravel
+Daryna
+Anastasia
+Artem
+Vadym
