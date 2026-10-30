@@ -93,6 +93,10 @@ def diarize_transcript(audio_path, transcript_path, token=None):
         raise ValueError("Transcript is empty.")
 
     pipeline = Pipeline.from_pretrained(MODEL, token=token)
+    import torch
+
+    if torch.cuda.is_available():
+        pipeline.to(torch.device("cuda"))
     output = pipeline(_load_audio_tensor(audio_path))
     annotation = getattr(
         output, "exclusive_speaker_diarization", output.speaker_diarization
