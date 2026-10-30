@@ -1,18 +1,18 @@
+import csv
 import hashlib
 import hmac
+import io
 import json
 import os
+import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import streamlit as st
 from dotenv import load_dotenv
 
 import auth_db
-from ai_agent import MIN_TRANSCRIPT_WORDS, load_transcript
-PROJECT_DIR = Path(__file__).resolve().parent
-load_dotenv(dotenv_path=PROJECT_DIR / ".env")
-
-from meeting_history import MeetingHistory
+from ai_agent import load_transcript
 from remote_config import (
     CLOUD_OLLAMA_HOST,
     LOCAL_OLLAMA_HOST,
@@ -20,12 +20,27 @@ from remote_config import (
     get_ollama_host,
     get_setting,
 )
+from meeting_history import MeetingHistory
 from remote_workflow import process_uploaded_recording
 import meeting_bot
 import rag
 from tab_recorder import tab_recorder
+from transcript_quality import LEARNED_FILE, vocabulary
 
-st.set_page_config(page_title="AI Assistant", layout="wide")
+PROJECT_DIR = Path(__file__).resolve().parent
+VOCABULARY_FILE = PROJECT_DIR / "vocabulary.txt"
+LANGUAGES = {"Auto-detect": None, "English": "en", "Ukrainian": "uk", "Russian": "ru"}
+MEETINGS_CACHE_SECONDS = 45
+
+load_dotenv(dotenv_path=PROJECT_DIR / ".env")
+st.set_page_config(
+    page_title="Meeting Intelligence",
+    page_icon=":material/graphic_eq:",
+    layout="wide",
+)
+
+
+# ---------------------------------------------------------------- access control
 
 
 def require_password():
@@ -93,94 +108,6 @@ if auth_db.is_configured():
     require_login()
 else:
     require_password()
-st.title("AI Assistant")
-st.caption("Created by Daryna Ladanovska · Version 1.0")
-st.subheader("Meeting history")
-
-
-def ollama_target_label(host):
-    if host.rstrip("/") == CLOUD_OLLAMA_HOST.rstrip("/"):
-        return "Ollama Cloud"
-    if host.rstrip("/") == LOCAL_OLLAMA_HOST.rstrip("/"):
-        return "Local Ollama"
-    return "Custom Ollama endpoint"
-
-
-with st.sidebar:
-    if st.session_state.get("supabase_user"):
-        st.caption(f"Signed in as {st.session_state['supabase_user']}")
-    if st.button("Sign out" if st.session_state.get("supabase_user") else "Lock app"):
-        auth_db.sign_out()
-        st.session_state.pop("authenticated", None)
-        st.rerun()
-    st.subheader("Ollama connection")
-    ollama_host = get_ollama_host()
-    api_key_configured = bool(get_setting("OLLAMA_API_KEY"))
-    st.caption(f"Endpoint: {ollama_target_label(ollama_host)}")
-    st.caption(f"API key: {'configured' if api_key_configured else 'missing'}")
-
-    if st.button(
-        "Test Ollama connection",
-        disabled=not api_key_configured,
-        key="test_ollama_connection",
-    ):
-        try:
-            with st.spinner("Checking Ollama API access..."):
-                get_ollama_client().list()
-        except Exception as error:
-            status_code = getattr(error, "status_code", None)
-            if status_code == 401:
-                message = "Ollama rejected the API key. Check OLLAMA_API_KEY in app secrets."
-            elif status_code == 402:
-                message = "Ollama reports that this account needs usage credits."
-            elif status_code == 429:
-                message = "Ollama rate limit reached. Try again later."
-            else:
-                message = (
-                    f"Could not reach {ollama_target_label(ollama_host)} "
-                    f"({type(error).__name__}). Check OLLAMA_HOST and network access."
-                )
-            st.error(message)
-        else:
-            st.success("Connected to Ollama API.")
-
-
-def transcript_is_too_short(meeting):
-    if meeting["status"] not in {"analysis_failed", "too_short_to_analyze"}:
-        return False
-    try:
-        entries = load_transcript(Path(meeting["transcript_path"]))
-    except (OSError, ValueError):
-        return meeting["status"] == "too_short_to_analyze"
-    transcript = "\n".join(
-        f"{entry.get('timestamp', '')} | "
-        f"{entry.get('speaker', 'Unknown')}: {entry.get('text', '')}"
-        for entry in entries
-    )
-    return len(transcript.split()) < MIN_TRANSCRIPT_WORDS
-
-
-def display_status(meeting):
-    if transcript_is_too_short(meeting):
-        return "Too short to analyze"
-    return meeting["status"].replace("_", " ").capitalize()
-
-
-st.subheader("Record or process a meeting")
-audio_source = st.segmented_control(
-    "Recording source",
-    options=[
-        "Send AI bot to a meeting",
-        "Browser microphone",
-        "Tabs / system audio + microphone",
-        "Upload file",
-    ],
-    default="Browser microphone",
-    key="audio_source",
-)
-consent_confirmed = st.checkbox(
-    "I have consent to record and transcribe this meeting."
-)
 
 
 def current_viewer():
@@ -195,33 +122,172 @@ def current_viewer():
 
 viewer_id, viewer_email, viewer_sees_all = current_viewer()
 scope_owner_id = None if viewer_sees_all else viewer_id
-
-if auth_db.is_configured():
-    with st.sidebar:
-        total_on_server = len(MeetingHistory().list_meetings(limit=100000))
-        if viewer_sees_all:
-            st.caption(
-                f"Admin view: all users' meetings. Saved copies are in the Cloud tab "
-                f"({total_on_server} on this server's temporary disk)."
-            )
-        else:
-            st.caption(
-                f"Showing only your meetings. {total_on_server} on server in total. "
-                "If you are the admin, set ADMIN_EMAIL to your sign-in email "
-                f"(signed in as {viewer_email})."
-            )
+history = MeetingHistory()
 
 
-def process_audio(audio_bytes, filename):
+# ---------------------------------------------------------------- meeting data
+
+
+def parse_when(value):
+    try:
+        moment = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment.astimezone()
+
+
+def when_label(value):
+    moment = parse_when(value)
+    if moment is None:
+        return str(value)[:16]
+    today = datetime.now().astimezone().date()
+    if moment.date() == today:
+        return "Today"
+    if moment.date() == today - timedelta(days=1):
+        return "Yesterday"
+    return moment.strftime("%d %b")
+
+
+def when_full(value):
+    moment = parse_when(value)
+    return moment.strftime("%d %b %Y, %H:%M") if moment else str(value)
+
+
+def read_text(path):
+    path = Path(path) if path else None
+    try:
+        return path.read_text(encoding="utf-8") if path and path.is_file() else ""
+    except OSError:
+        return ""
+
+
+def parse_json(value):
+    if isinstance(value, dict):
+        return value
+    try:
+        parsed = json.loads(value) if value else None
+    except (TypeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def parse_transcript(text):
+    entries = []
+    for line in (text or "").splitlines():
+        if line.strip():
+            try:
+                entries.append(json.loads(line))
+            except ValueError:
+                continue
+    return entries
+
+
+def normalize_cloud(row):
+    return {
+        "id": row["meeting_id"],
+        "recorded_at": row.get("recorded_at") or "",
+        "status": row.get("status") or "",
+        "notes": row.get("notes") or "",
+        "transcript": row.get("transcript") or "",
+        "minutes": parse_json(row.get("minutes")),
+        "owner_email": row.get("owner_email"),
+        "error": None,
+        "source": "cloud",
+    }
+
+
+def normalize_local(meeting):
+    return {
+        "id": meeting["meeting_id"],
+        "recorded_at": meeting["timestamp"],
+        "status": meeting["status"],
+        "notes": read_text(meeting["notes_path"]),
+        "transcript": read_text(meeting["transcript_path"]),
+        "minutes": parse_json(meeting["minutes_json"]),
+        "owner_email": meeting.get("owner_email"),
+        "error": meeting.get("error"),
+        "source": "local",
+    }
+
+
+def load_meetings(force=False):
+    """Cloud meetings plus any local-only ones, newest first, cached briefly per session."""
+    cached = st.session_state.get("meetings_cache")
+    if cached and not force and time.time() - cached[0] < MEETINGS_CACHE_SECONDS:
+        return cached[1]
+    items, seen = [], set()
+    if auth_db.is_configured() and st.session_state.get("supabase_user"):
+        try:
+            rows = auth_db.list_meetings(auth_db.client_for_user())
+        except PermissionError:
+            auth_db.sign_out()
+            st.rerun()
+        except Exception as error:
+            st.warning(f"Could not load cloud meetings: {error}")
+            rows = []
+        for row in rows:
+            items.append(normalize_cloud(row))
+            seen.add(row["meeting_id"])
+    for meeting in history.list_meetings(limit=500, owner_id=scope_owner_id):
+        if meeting["meeting_id"] not in seen:
+            items.append(normalize_local(meeting))
+    items.sort(
+        key=lambda item: (parse_when(item["recorded_at"]) or datetime.min.replace(tzinfo=timezone.utc)),
+        reverse=True,
+    )
+    st.session_state["meetings_cache"] = (time.time(), items)
+    return items
+
+
+def refresh_meetings():
+    st.session_state.pop("meetings_cache", None)
+
+
+def minutes_list(meeting, key):
+    minutes = meeting["minutes"] or {}
+    value = minutes.get(key)
+    return value if isinstance(value, list) else []
+
+
+def meeting_title(meeting):
+    topics = minutes_list(meeting, "discussion_topics")
+    if topics and topics[0].get("topic"):
+        return str(topics[0]["topic"])
+    return f"Meeting · {when_full(meeting['recorded_at'])}"
+
+
+def meeting_duration_hours(meeting):
+    ends = [float(e["end"]) for e in parse_transcript(meeting["transcript"]) if isinstance(e.get("end"), (int, float))]
+    return max(ends) / 3600 if ends else 0.0
+
+
+def status_label(meeting):
+    return (meeting["status"] or "unknown").replace("_", " ").capitalize()
+
+
+def open_meeting(meeting_id):
+    st.session_state["open_meeting"] = meeting_id
+    st.switch_page(PAGE_MEETINGS)
+
+
+# ---------------------------------------------------------------- recording flow
+
+
+def process_audio(audio_bytes, filename, consent):
+    language = LANGUAGES.get(st.session_state.get("transcription_language", "Auto-detect"))
     with st.spinner("Transcribing, diarizing, and generating meeting minutes..."):
         result = process_uploaded_recording(
             audio_bytes,
             filename,
-            consent_confirmed=consent_confirmed,
+            consent_confirmed=consent,
             owner_id=viewer_id,
             owner_email=viewer_email,
+            language=language,
         )
     save_to_cloud(result)
+    refresh_meetings()
     return result
 
 
@@ -233,7 +299,7 @@ def save_to_cloud(result):
         saved = next(
             (
                 meeting
-                for meeting in MeetingHistory().list_meetings(limit=50)
+                for meeting in history.list_meetings(limit=50)
                 if meeting["meeting_id"] == result.get("meeting_id")
             ),
             None,
@@ -251,7 +317,6 @@ def show_saved_transcript(result):
     transcript_path = Path(result.get("transcript_path", ""))
     if not transcript_path.is_file():
         return
-    st.caption(f"Transcript saved: {transcript_path}")
     transcript_text = transcript_path.read_text(encoding="utf-8")
     if transcript_text.strip():
         with st.expander("Transcript", expanded=result["status"] != "completed"):
@@ -270,11 +335,6 @@ def show_saved_transcript(result):
 
 
 def show_processing_result(result):
-    show_processing_result_body(result)
-    show_saved_transcript(result)
-
-
-def show_processing_result_body(result):
     if result["status"] == "completed":
         st.success(f"Meeting processed: {result['meeting_id']}")
         st.caption(
@@ -306,17 +366,34 @@ def show_processing_result_body(result):
             result.get("error", f"Processing finished with status: {result['status']}"),
             title="Meeting processing failed",
         )
+    show_saved_transcript(result)
 
 
-if audio_source == "Browser microphone":
-    st.caption(
-        "Use the recorder’s Start/Stop controls. This captures your browser microphone, "
-        "not Meet tab or system audio."
+def new_meeting_section():
+    audio_source = st.segmented_control(
+        "Recording source",
+        options=[
+            "Send AI bot to a meeting",
+            "Browser microphone",
+            "Tabs / system audio + microphone",
+            "Upload file",
+        ],
+        default="Send AI bot to a meeting",
+        key="audio_source",
     )
-    if not consent_confirmed:
-        st.info("Confirm recording consent above to enable the microphone recorder.")
-        st.session_state.pop("processed_browser_audio_hash", None)
-    else:
+    consent_confirmed = st.checkbox(
+        "I have consent to record and transcribe this meeting."
+    )
+
+    if audio_source == "Browser microphone":
+        st.caption(
+            "Use the recorder’s Start/Stop controls. This captures your browser microphone, "
+            "not Meet tab or system audio."
+        )
+        if not consent_confirmed:
+            st.info("Confirm recording consent above to enable the microphone recorder.")
+            st.session_state.pop("processed_browser_audio_hash", None)
+            return
         recorded_audio = st.audio_input(
             "Record from microphone",
             sample_rate=16000,
@@ -324,32 +401,33 @@ if audio_source == "Browser microphone":
         )
         if recorded_audio is None:
             st.session_state.pop("processed_browser_audio_hash", None)
-        else:
-            audio_bytes = recorded_audio.getvalue()
-            audio_hash = hashlib.sha256(audio_bytes).hexdigest()
-            if audio_hash != st.session_state.get("processed_browser_audio_hash"):
-                try:
-                    result = process_audio(audio_bytes, "browser-recording.wav")
-                    st.session_state["processed_browser_audio_hash"] = audio_hash
-                    st.session_state["last_recording_result"] = result
-                except Exception as error:
-                    st.error(f"Meeting processing failed: {error}")
-            if st.session_state.get("last_recording_result"):
-                show_processing_result(st.session_state["last_recording_result"])
-elif audio_source == "Send AI bot to a meeting":
-    st.caption(
-        "The AI assistant joins your Google Meet, Zoom or Microsoft Teams meeting as a "
-        "participant named below, records it, and then transcribes it. Admit it from the "
-        "lobby if asked. Everyone in the meeting will see the bot."
-    )
-    if not (meeting_bot.is_configured() and st.session_state.get("supabase_user")):
-        st.info("Sign in with Supabase to send the bot to a meeting.")
-    else:
+            return
+        audio_bytes = recorded_audio.getvalue()
+        audio_hash = hashlib.sha256(audio_bytes).hexdigest()
+        if audio_hash != st.session_state.get("processed_browser_audio_hash"):
+            try:
+                result = process_audio(audio_bytes, "browser-recording.wav", consent_confirmed)
+                st.session_state["processed_browser_audio_hash"] = audio_hash
+                st.session_state["last_recording_result"] = result
+            except Exception as error:
+                st.error(f"Meeting processing failed: {error}")
+        if st.session_state.get("last_recording_result"):
+            show_processing_result(st.session_state["last_recording_result"])
+    elif audio_source == "Send AI bot to a meeting":
+        st.caption(
+            "The AI assistant joins your Google Meet, Zoom or Microsoft Teams meeting as a "
+            "participant named below, records it, and then transcribes it. Admit it from the "
+            "lobby if asked. Everyone in the meeting will see the bot."
+        )
+        if not (meeting_bot.is_configured() and st.session_state.get("supabase_user")):
+            st.info("Sign in with Supabase to send the bot to a meeting.")
+            return
         bot_url = st.text_input("Meeting link", placeholder="https://meet.google.com/abc-defg-hij")
         bot_name = st.text_input("Bot name", value="AI Assistant")
         if st.button(
             "Send bot to meeting",
             type="primary",
+            icon=":material/smart_toy:",
             disabled=not (consent_confirmed and bot_url.strip()),
         ):
             try:
@@ -376,7 +454,8 @@ elif audio_source == "Send AI bot to a meeting":
                 if job and job.get("message"):
                     st.caption(job["message"])
                 if code in meeting_bot.FINISHED:
-                    st.success("Finished. Open the Cloud tab to read the notes and transcript.")
+                    refresh_meetings()
+                    st.success("Finished. Open **My Meetings** to read the notes and transcript.")
                 elif code not in meeting_bot.FAILED:
                     left_col, right_col = st.columns(2)
                     left_col.button("Refresh status")
@@ -385,289 +464,506 @@ elif audio_source == "Send AI bot to a meeting":
                         st.rerun()
             except Exception as error:
                 st.error(f"Bot error: {error}")
-elif audio_source == "Tabs / system audio + microphone":
-    st.caption(
-        "Records the other participants together with your microphone. Click Start, then in the "
-        "browser prompt either pick the Meet tab and tick **Share tab audio**, or pick "
-        "**Entire screen** and tick **Share system audio** to capture audio from all tabs "
-        "and apps (Chrome/Edge on Windows or ChromeOS; Mac can only share a single tab's audio). "
-        "Allow the microphone, and click Stop when the meeting ends."
-    )
-    if not consent_confirmed:
-        st.info("Confirm recording consent above to enable the recorder.")
-    tab_audio = tab_recorder(enabled=consent_confirmed, key="meeting_tab_recorder")
-    if tab_audio is not None and consent_confirmed:
-        tab_bytes, tab_mime = tab_audio
-        tab_hash = hashlib.sha256(tab_bytes).hexdigest()
-        if tab_hash != st.session_state.get("processed_tab_audio_hash"):
+    elif audio_source == "Tabs / system audio + microphone":
+        st.caption(
+            "Records the other participants together with your microphone. Click Start, then in the "
+            "browser prompt either pick the Meet tab and tick **Share tab audio**, or pick "
+            "**Entire screen** and tick **Share system audio** to capture audio from all tabs "
+            "and apps (Chrome/Edge on Windows or ChromeOS; Mac can only share a single tab's audio). "
+            "Allow the microphone, and click Stop when the meeting ends."
+        )
+        if not consent_confirmed:
+            st.info("Confirm recording consent above to enable the recorder.")
+        tab_audio = tab_recorder(enabled=consent_confirmed, key="meeting_tab_recorder")
+        if tab_audio is not None and consent_confirmed:
+            tab_bytes, tab_mime = tab_audio
+            tab_hash = hashlib.sha256(tab_bytes).hexdigest()
+            if tab_hash != st.session_state.get("processed_tab_audio_hash"):
+                try:
+                    extension = "ogg" if "ogg" in tab_mime else "webm"
+                    result = process_audio(tab_bytes, f"tab-recording.{extension}", consent_confirmed)
+                    st.session_state["processed_tab_audio_hash"] = tab_hash
+                    st.session_state["last_recording_result"] = result
+                except Exception as error:
+                    st.error(f"Meeting processing failed: {error}")
+        if st.session_state.get("last_recording_result"):
+            show_processing_result(st.session_state["last_recording_result"])
+    else:
+        with st.form("meeting_upload", clear_on_submit=False):
+            uploaded_audio = st.file_uploader(
+                "Meeting audio or video",
+                type=["wav", "mp3", "m4a", "flac", "ogg", "mp4", "webm"],
+                max_upload_size=512,
+                help="Maximum 512 MB. The uploaded file is processed temporarily and is not retained.",
+            )
+            process_recording = st.form_submit_button(
+                "Transcribe and analyze",
+                type="primary",
+                disabled=uploaded_audio is None or not consent_confirmed,
+                width="stretch",
+            )
+        if process_recording and uploaded_audio is not None:
             try:
-                extension = "ogg" if "ogg" in tab_mime else "webm"
-                result = process_audio(tab_bytes, f"tab-recording.{extension}")
-                st.session_state["processed_tab_audio_hash"] = tab_hash
-                st.session_state["last_recording_result"] = result
+                result = process_audio(uploaded_audio.getvalue(), uploaded_audio.name, consent_confirmed)
+                show_processing_result(result)
             except Exception as error:
                 st.error(f"Meeting processing failed: {error}")
-    if st.session_state.get("last_recording_result"):
-        show_processing_result(st.session_state["last_recording_result"])
-else:
-    with st.form("meeting_upload", clear_on_submit=False):
-        uploaded_audio = st.file_uploader(
-            "Meeting audio or video",
-            type=["wav", "mp3", "m4a", "flac", "ogg", "mp4", "webm"],
-            max_upload_size=512,
-            help="Maximum 512 MB. The uploaded file is processed temporarily and is not retained.",
+
+
+# ---------------------------------------------------------------- Q&A
+
+
+def answer_question(question):
+    """Returns (answer, passages). Raises on failure; callers map errors to messages."""
+    if auth_db.is_configured() and st.session_state.get("supabase_user"):
+        cloud_db = auth_db.client_for_user()
+        rag.index_missing(cloud_db)
+        return rag.answer_question(cloud_db, question)
+    return history.answer(question, limit=5, owner_id=scope_owner_id), []
+
+
+def friendly_error(error):
+    if "meeting_chunks" in str(error) or "search_meeting_chunks" in str(error):
+        return (
+            "The search index is not set up yet. Run supabase_migration_rag.sql "
+            "in the Supabase SQL Editor."
         )
-        process_recording = st.form_submit_button(
-            "Transcribe and analyze",
-            type="primary",
-            disabled=uploaded_audio is None or not consent_confirmed,
-            width="stretch",
-        )
+    return f"Could not answer: {error}"
 
-    if process_recording and uploaded_audio is not None:
-        try:
-            result = process_audio(uploaded_audio.getvalue(), uploaded_audio.name)
-            show_processing_result(result)
-        except Exception as error:
-            st.error(f"Meeting processing failed: {error}")
 
-st.divider()
-
-history = MeetingHistory()
-meetings = history.list_meetings(limit=500, owner_id=scope_owner_id)
-statuses = sorted({meeting["status"] for meeting in meetings})
-
-with st.sidebar:
-    st.header("Filters")
-    selected_status = st.selectbox("Status", ["All", *statuses])
-    st.divider()
-    st.caption("Natural-language questions use matching local history and Ollama.")
-
-filtered_meetings = [
-    meeting
-    for meeting in meetings
-    if selected_status == "All" or meeting["status"] == selected_status
-]
-completed_count = sum(meeting["status"] == "completed" for meeting in meetings)
-
-metric_columns = st.columns(3)
-metric_columns[0].metric("Meetings", len(meetings))
-metric_columns[1].metric("Completed", completed_count)
-metric_columns[2].metric("Needs attention", len(meetings) - completed_count)
-
-list_tab, search_tab, ask_tab, cloud_tab = st.tabs(
-    ["Meetings", "Search", "Ask", "Cloud"]
-)
-
-with cloud_tab:
-    if not st.session_state.get("supabase_user"):
-        st.info("Sign in with Supabase to see meetings synced from your computer.")
-    else:
-        st.caption(
-            "New recordings are saved here automatically and survive redeploys. "
-            "Run `python sync_meeting.py` to upload older local meetings."
-        )
-        try:
-            cloud_meetings = auth_db.list_meetings(auth_db.client_for_user())
-        except PermissionError:
-            auth_db.sign_out()
-            st.rerun()
-        except Exception as error:
-            st.error(f"Could not load cloud meetings: {error}")
-            cloud_meetings = []
-        if not cloud_meetings:
-            st.info("No synced meetings yet.")
-        for item in cloud_meetings:
-            by = f" · {item['owner_email']}" if viewer_sees_all and item.get("owner_email") else ""
-            with st.expander(f"{item['recorded_at']} · {item['meeting_id']} · {item['status']}{by}"):
-                if item.get("notes"):
-                    st.markdown(item["notes"])
-                    st.download_button(
-                        "Download notes (.md)",
-                        data=item["notes"],
-                        file_name=f"meeting_notes_{item['meeting_id']}.md",
-                        mime="text/markdown",
-                        key=f"cloud_notes_{item['meeting_id']}",
-                    )
-                if item.get("transcript"):
-                    st.download_button(
-                        "Download transcript (.jsonl)",
-                        data=item["transcript"],
-                        file_name=f"transcript_{item['meeting_id']}.jsonl",
-                        mime="application/jsonl",
-                        key=f"cloud_transcript_{item['meeting_id']}",
-                    )
-
-with list_tab:
-    if not filtered_meetings:
-        st.info("No meetings match this status yet.")
-    else:
-        table_rows = [
-            {
-                "Timestamp": meeting["timestamp"],
-                "Meeting ID": meeting["meeting_id"],
-                "Status": display_status(meeting),
-                "Notes": "Available" if meeting["notes_path"] else "Pending",
-                **(
-                    {"Recorded by": meeting["owner_email"] or "Unknown (before accounts)"}
-                    if viewer_sees_all and auth_db.is_configured()
-                    else {}
-                ),
-            }
-            for meeting in filtered_meetings
-        ]
-        st.dataframe(table_rows, width="stretch", hide_index=True)
-
-        selected_id = st.selectbox(
-            "Meeting details",
-            [meeting["meeting_id"] for meeting in filtered_meetings],
-        )
-        selected = next(
-            meeting for meeting in filtered_meetings
-            if meeting["meeting_id"] == selected_id
-        )
-
-        left, right = st.columns(2)
-        left.markdown(f"**Timestamp**  \n{selected['timestamp']}")
-        if viewer_sees_all and auth_db.is_configured():
-            left.caption(
-                f"Recorded by: {selected['owner_email'] or 'Unknown (before accounts)'}"
+def show_sources(passages):
+    if not passages:
+        return
+    with st.expander(f"Sources ({len(passages)})"):
+        for number, passage in enumerate(passages, start=1):
+            st.markdown(
+                f"**[{number}]** `{passage['meeting_id']}` · "
+                f"{str(passage.get('recorded_at') or '')[:16]} · {passage['kind']}"
             )
-        selected_too_short = transcript_is_too_short(selected)
-        right.markdown(f"**Status**  \n{display_status(selected)}")
-        st.caption(f"Transcript: {selected['transcript_path']}")
-        if selected["error"]:
-            if selected_too_short:
-                st.warning(
-                    "The transcript is saved, but it contains too little speech "
-                    "for reliable minutes. Record more audio and try again.",
-                    title="Meeting too short to analyze",
-                )
-            else:
-                st.warning(selected["error"])
+            st.text(passage["content"][:600])
 
-        selected_transcript_path = Path(selected["transcript_path"])
-        if selected_transcript_path.is_file():
-            raw_transcript = selected_transcript_path.read_text(encoding="utf-8")
-            if raw_transcript.strip():
-                try:
-                    transcript_lines = [
-                        f"[{entry.get('timestamp', '')}] "
-                        f"{entry.get('speaker', 'Unknown')}: {entry.get('text', '')}"
-                        for entry in load_transcript(selected_transcript_path)
-                    ]
-                    readable_transcript = "\n".join(transcript_lines)
-                except Exception:
-                    readable_transcript = raw_transcript
-                transcript_columns = st.columns(2)
-                transcript_columns[0].download_button(
-                    "Download transcript (.txt)",
-                    data=readable_transcript,
-                    file_name=f"transcript_{selected['meeting_id']}.txt",
-                    mime="text/plain",
-                    key=f"download_transcript_txt_{selected['meeting_id']}",
-                )
-                transcript_columns[1].download_button(
-                    "Download transcript (.jsonl)",
-                    data=raw_transcript,
-                    file_name=f"transcript_{selected['meeting_id']}.jsonl",
-                    mime="application/jsonl",
-                    key=f"download_transcript_jsonl_{selected['meeting_id']}",
-                )
-            else:
-                st.caption("No speech was captured, so the transcript is empty.")
-        else:
-            st.caption("Transcript file is no longer available on the server.")
 
-        if selected["minutes_json"]:
-            minutes = json.loads(selected["minutes_json"])
-            st.subheader("Action items")
-            action_items = minutes.get("action_items", [])
-            if action_items:
-                st.dataframe(action_items, width="stretch", hide_index=True)
-            else:
-                st.caption("No action items captured.")
+# ---------------------------------------------------------------- pages
 
-            with st.expander("Structured minutes and transcript references"):
-                st.json(minutes)
 
-        if selected["notes_path"]:
-            notes_path = Path(selected["notes_path"])
-            if notes_path.exists():
-                notes_markdown = notes_path.read_text(encoding="utf-8")
-                with st.expander("Meeting notes", expanded=True):
-                    st.markdown(notes_markdown)
-                download_columns = st.columns(2)
-                download_columns[0].download_button(
-                    "Download notes (.md)",
-                    data=notes_markdown,
-                    file_name=f"meeting_notes_{selected['meeting_id']}.md",
-                    mime="text/markdown",
-                    key=f"download_notes_{selected['meeting_id']}",
-                )
-                if selected["minutes_json"]:
-                    download_columns[1].download_button(
-                        "Download structured minutes (.json)",
-                        data=selected["minutes_json"],
-                        file_name=f"meeting_minutes_{selected['meeting_id']}.json",
-                        mime="application/json",
-                        key=f"download_minutes_{selected['meeting_id']}",
+def dashboard_page():
+    meetings = load_meetings()
+    actions = [a for m in meetings for a in minutes_list(m, "action_items")]
+    hours = sum(meeting_duration_hours(m) for m in meetings)
+
+    st.title("Meeting Intelligence")
+    metric_columns = st.columns(3)
+    metric_columns[0].metric("Meetings", len(meetings), border=True)
+    metric_columns[1].metric("Action items", len(actions), border=True)
+    metric_columns[2].metric("Hours transcribed", f"{hours:.1f}", border=True)
+
+    recent_column, ask_column = st.columns([3, 2], gap="large")
+    with recent_column:
+        header, view_all = st.columns([3, 1], vertical_alignment="center")
+        header.subheader("Recent meetings")
+        if view_all.button("View all", key="view_all", type="tertiary"):
+            st.switch_page(PAGE_MEETINGS)
+        if not meetings:
+            st.info("No meetings yet. Send the bot to a meeting or upload a recording below.")
+        for meeting in meetings[:3]:
+            with st.container(border=True):
+                text_column, when_column = st.columns([4, 1], vertical_alignment="center")
+                text_column.markdown(f"**{meeting_title(meeting)}**")
+                if meeting["minutes"]:
+                    detail = (
+                        f"{len(minutes_list(meeting, 'decisions'))} decisions · "
+                        f"{len(minutes_list(meeting, 'action_items'))} actions"
                     )
-
-with search_tab:
-    query = st.text_input("Search transcripts, notes, owners, or deadlines")
-    if st.button("Search", key="search_button", disabled=not query.strip()):
-        try:
-            results = history.search(query, limit=30, owner_id=scope_owner_id)
-        except Exception as error:
-            st.error(f"Search failed: {error}")
-        else:
-            if not results:
-                st.info("No matching meeting history found.")
-            for result in results:
-                with st.container(border=True):
-                    st.markdown(
-                        f"**{result['timestamp']}** · `{result['meeting_id']}` · "
-                        f"{result['kind']} · {result['status']}"
-                    )
-                    st.write(result["excerpt"])
-
-with ask_tab:
-    cloud_ready = auth_db.is_configured() and bool(st.session_state.get("supabase_user"))
-    question = st.text_input(
-        "Ask about decisions, assigned tasks, deadlines, or open questions",
-        placeholder="What decisions did we make about the product launch?",
-    )
-    if cloud_ready:
-        st.caption(
-            "Searches only your own saved meetings (transcripts and notes) and cites the sources. "
-            "Try: *What deadlines were discussed last week?*"
-        )
-    if st.button("Ask", key="ask_button", disabled=not question.strip()):
-        try:
-            with st.spinner("Searching your meetings and asking Ollama..."):
-                if cloud_ready:
-                    cloud_db = auth_db.client_for_user()
-                    rag.index_missing(cloud_db)
-                    answer, passages = rag.answer_question(cloud_db, question)
                 else:
-                    answer = history.answer(question, limit=5, owner_id=scope_owner_id)
-                    passages = []
-        except Exception as error:
-            if "meeting_chunks" in str(error) or "search_meeting_chunks" in str(error):
-                st.error(
-                    "The search index is not set up yet. Run supabase_migration_rag.sql "
-                    "in the Supabase SQL Editor."
-                )
-            else:
-                st.error(f"Could not answer: {error}")
+                    detail = status_label(meeting)
+                text_column.caption(detail)
+                when_column.caption(when_label(meeting["recorded_at"]))
+                if when_column.button("Open", key=f"open_{meeting['id']}", type="tertiary"):
+                    open_meeting(meeting["id"])
+    with ask_column:
+        st.subheader("Ask your meetings")
+        with st.container(border=True):
+            quick_question = st.text_input(
+                "Question",
+                placeholder="What did we decide about the project launch?",
+                label_visibility="collapsed",
+                key="dashboard_question",
+            )
+            if st.button("Ask", icon=":material/arrow_forward:", disabled=not quick_question.strip()):
+                st.session_state["pending_question"] = quick_question.strip()
+                st.switch_page(PAGE_CHAT)
+            st.caption("Answers grounded in your private transcripts")
+
+    with st.expander("New meeting: send the bot, record or upload", icon=":material/add_circle:"):
+        new_meeting_section()
+
+
+def meetings_page():
+    st.title("My Meetings")
+    top_left, top_middle, top_right = st.columns([3, 1, 1], vertical_alignment="bottom")
+    query = top_left.text_input(
+        "Search",
+        placeholder="Search titles, notes, transcripts, owners or deadlines",
+        label_visibility="collapsed",
+        icon=":material/search:",
+    )
+    meetings = load_meetings()
+    statuses = sorted({m["status"] for m in meetings})
+    status_filter = top_middle.selectbox(
+        "Status", ["All", *statuses], label_visibility="collapsed", format_func=lambda s: s if s == "All" else s.replace("_", " ").capitalize()
+    )
+    if top_right.button("Refresh", icon=":material/refresh:", width="stretch"):
+        refresh_meetings()
+        st.rerun()
+
+    needle = query.strip().casefold()
+    filtered = [
+        m
+        for m in meetings
+        if (status_filter == "All" or m["status"] == status_filter)
+        and (
+            not needle
+            or needle in meeting_title(m).casefold()
+            or needle in m["id"].casefold()
+            or needle in m["notes"].casefold()
+            or needle in m["transcript"].casefold()
+        )
+    ]
+    if not meetings:
+        st.info("No meetings yet. Record one from the Dashboard.")
+        return
+    if not filtered:
+        st.info("No meetings match your search.")
+        return
+
+    rows = [
+        {
+            "When": when_full(m["recorded_at"]),
+            "Meeting": meeting_title(m),
+            "Status": status_label(m),
+            "Decisions": len(minutes_list(m, "decisions")),
+            "Actions": len(minutes_list(m, "action_items")),
+            **({"Recorded by": m["owner_email"] or "Unknown"} if viewer_sees_all and auth_db.is_configured() else {}),
+        }
+        for m in filtered
+    ]
+    st.dataframe(rows, hide_index=True, width="stretch")
+
+    ids = [m["id"] for m in filtered]
+    preferred = st.session_state.pop("open_meeting", None)
+    if preferred in ids:
+        st.session_state["meeting_select"] = preferred
+    elif st.session_state.get("meeting_select") not in ids:
+        st.session_state["meeting_select"] = ids[0]
+    selected_id = st.selectbox(
+        "Meeting",
+        ids,
+        key="meeting_select",
+        format_func=lambda i: f"{when_full(next(m for m in filtered if m['id'] == i)['recorded_at'])} · "
+        f"{meeting_title(next(m for m in filtered if m['id'] == i))}",
+    )
+    meeting = next(m for m in filtered if m["id"] == selected_id)
+    show_meeting(meeting)
+
+
+def show_meeting(meeting):
+    st.header(meeting_title(meeting))
+    st.caption(
+        f"{when_full(meeting['recorded_at'])} · {status_label(meeting)} · "
+        f"{'Saved in cloud' if meeting['source'] == 'cloud' else 'This server only'}"
+        + (f" · Recorded by {meeting['owner_email']}" if viewer_sees_all and meeting["owner_email"] else "")
+    )
+    if meeting["error"]:
+        st.warning(meeting["error"])
+
+    minutes_tab, transcript_tab, actions_tab = st.tabs(["Minutes", "Transcript", "Action items"])
+    minutes = meeting["minutes"]
+    with minutes_tab:
+        if not minutes:
+            st.info("Minutes have not been generated for this meeting.")
         else:
-            st.markdown(answer)
-            if passages:
-                with st.expander(f"Sources ({len(passages)})"):
-                    for number, passage in enumerate(passages, start=1):
-                        st.markdown(
-                            f"**[{number}]** `{passage['meeting_id']}` · "
-                            f"{str(passage.get('recorded_at') or '')[:16]} · {passage['kind']}"
-                        )
-                        st.text(passage["content"][:600])
+            if minutes.get("summary"):
+                st.subheader("Summary")
+                st.write(minutes["summary"])
+            topics = minutes_list(meeting, "discussion_topics")
+            if topics:
+                st.subheader("Discussion topics")
+                for topic in topics:
+                    with st.expander(str(topic.get("topic", "Topic"))):
+                        st.write(topic.get("details", ""))
+            decisions = minutes_list(meeting, "decisions")
+            if decisions:
+                st.subheader("Decisions")
+                for decision in decisions:
+                    st.markdown(f"- {decision.get('decision', '')}")
+            questions = minutes_list(meeting, "unresolved_questions")
+            if questions:
+                st.subheader("Open questions")
+                for question in questions:
+                    st.markdown(f"- {question.get('question', '')}")
+        if meeting["notes"]:
+            with st.expander("Full notes with transcript references"):
+                st.markdown(meeting["notes"])
+            st.download_button(
+                "Download notes (.md)",
+                data=meeting["notes"],
+                file_name=f"meeting_notes_{meeting['id']}.md",
+                mime="text/markdown",
+                key=f"notes_{meeting['id']}",
+            )
+        if minutes:
+            st.download_button(
+                "Download structured minutes (.json)",
+                data=json.dumps(minutes, indent=2, ensure_ascii=False),
+                file_name=f"meeting_minutes_{meeting['id']}.json",
+                mime="application/json",
+                key=f"minutes_{meeting['id']}",
+            )
+    with transcript_tab:
+        entries = parse_transcript(meeting["transcript"])
+        if not entries:
+            st.info("No transcript available (no speech was captured, or the file is gone from this server).")
+        else:
+            speakers = sorted({str(e.get("speaker", "Unknown")) for e in entries})
+            chosen = st.multiselect("Speakers", speakers, default=speakers, key=f"speakers_{meeting['id']}")
+            with st.container(height=520):
+                for entry in entries:
+                    speaker = str(entry.get("speaker", "Unknown"))
+                    if speaker not in chosen:
+                        continue
+                    start = entry.get("start")
+                    stamp = f"{int(start) // 60:02d}:{int(start) % 60:02d}" if isinstance(start, (int, float)) else ""
+                    st.markdown(f"`{stamp}` **{speaker}** {entry.get('text', '')}")
+            readable = "\n".join(
+                f"[{e.get('timestamp', '')}] {e.get('speaker', 'Unknown')}: {e.get('text', '')}" for e in entries
+            )
+            download_columns = st.columns(2)
+            download_columns[0].download_button(
+                "Download transcript (.txt)",
+                data=readable,
+                file_name=f"transcript_{meeting['id']}.txt",
+                mime="text/plain",
+                key=f"txt_{meeting['id']}",
+            )
+            download_columns[1].download_button(
+                "Download transcript (.jsonl)",
+                data=meeting["transcript"],
+                file_name=f"transcript_{meeting['id']}.jsonl",
+                mime="application/jsonl",
+                key=f"jsonl_{meeting['id']}",
+            )
+    with actions_tab:
+        items = minutes_list(meeting, "action_items")
+        if items:
+            st.dataframe(
+                [{"Task": a.get("task"), "Owner": a.get("owner"), "Deadline": a.get("deadline")} for a in items],
+                hide_index=True,
+                width="stretch",
+            )
+        else:
+            st.caption("No action items captured.")
+
+
+def chat_page():
+    st.title("AI Chat")
+    st.caption("Ask questions across your meeting transcripts. Answers cite their sources.")
+    messages = st.session_state.setdefault("chat_messages", [])
+
+    pending = st.session_state.pop("pending_question", None)
+    typed = st.chat_input("Ask about decisions, tasks, deadlines or open questions")
+    question = pending or typed
+
+    if not messages and not question:
+        suggestion = st.pills(
+            "Try asking",
+            [
+                "What decisions did we make?",
+                "What action items are open and who owns them?",
+                "What deadlines were discussed?",
+            ],
+            key="chat_suggestion",
+        )
+        question = suggestion
+
+    for message in messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+            show_sources(message.get("passages"))
+
+    if question:
+        messages.append({"role": "user", "content": question})
+        with st.chat_message("user"):
+            st.markdown(question)
+        with st.chat_message("assistant"):
+            try:
+                with st.spinner("Searching your meetings..."):
+                    answer, passages = answer_question(question)
+            except Exception as error:
+                answer, passages = friendly_error(error), []
+                st.error(answer)
+            else:
+                st.markdown(answer)
+                show_sources(passages)
+        messages.append({"role": "assistant", "content": answer, "passages": passages})
+    if messages and st.button("Clear conversation", icon=":material/delete:", type="tertiary"):
+        st.session_state["chat_messages"] = []
+        st.rerun()
+
+
+def actions_page():
+    st.title("Action Items")
+    meetings = load_meetings()
+    rows = []
+    for meeting in meetings:
+        for item in minutes_list(meeting, "action_items"):
+            rows.append(
+                {
+                    "Task": item.get("task", ""),
+                    "Owner": item.get("owner", "Not specified"),
+                    "Deadline": item.get("deadline", "Not specified"),
+                    "Meeting": meeting_title(meeting),
+                    "Date": when_full(meeting["recorded_at"]),
+                }
+            )
+    if not rows:
+        st.info("No action items yet. They appear here after a meeting's minutes are generated.")
+        return
+
+    unassigned = sum(r["Owner"].strip().casefold() in {"", "not specified"} for r in rows)
+    with_deadline = sum(r["Deadline"].strip().casefold() not in {"", "not specified"} for r in rows)
+    metric_columns = st.columns(3)
+    metric_columns[0].metric("Total", len(rows), border=True)
+    metric_columns[1].metric("Without an owner", unassigned, border=True)
+    metric_columns[2].metric("With a deadline", with_deadline, border=True)
+
+    filter_left, filter_right = st.columns([2, 1])
+    needle = filter_left.text_input(
+        "Search tasks", label_visibility="collapsed", placeholder="Search tasks", icon=":material/search:"
+    ).strip().casefold()
+    owners = sorted({r["Owner"] for r in rows})
+    chosen_owners = filter_right.multiselect("Owner", owners, placeholder="All owners")
+    shown = [
+        r
+        for r in rows
+        if (not needle or needle in r["Task"].casefold() or needle in r["Meeting"].casefold())
+        and (not chosen_owners or r["Owner"] in chosen_owners)
+    ]
+    st.dataframe(shown, hide_index=True, width="stretch")
+
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=list(rows[0]))
+    writer.writeheader()
+    writer.writerows(shown)
+    st.download_button(
+        "Export CSV",
+        data=buffer.getvalue(),
+        file_name="action_items.csv",
+        mime="text/csv",
+        icon=":material/download:",
+    )
+
+
+def ollama_target_label(host):
+    if host.rstrip("/") == CLOUD_OLLAMA_HOST.rstrip("/"):
+        return "Ollama Cloud"
+    if host.rstrip("/") == LOCAL_OLLAMA_HOST.rstrip("/"):
+        return "Local Ollama"
+    return "Custom Ollama endpoint"
+
+
+def settings_page():
+    st.title("Settings")
+
+    st.subheader("Account")
+    with st.container(border=True):
+        if st.session_state.get("supabase_user"):
+            st.write(f"Signed in as **{st.session_state['supabase_user']}**")
+            if auth_db.is_configured() and viewer_sees_all:
+                st.caption("Admin view: you see all users' meetings.")
+            elif auth_db.is_configured():
+                st.caption(
+                    "You see only your own meetings. To get the admin view, set ADMIN_EMAIL "
+                    f"to your sign-in email ({viewer_email})."
+                )
+        else:
+            st.write("Password-protected session.")
+        if st.button("Sign out" if st.session_state.get("supabase_user") else "Lock app", icon=":material/logout:"):
+            auth_db.sign_out()
+            st.session_state.pop("authenticated", None)
+            st.rerun()
+
+    st.subheader("Transcription")
+    with st.container(border=True):
+        st.session_state["transcription_language"] = st.selectbox(
+            "Language for uploads and in-browser recordings",
+            list(LANGUAGES),
+            index=list(LANGUAGES).index(st.session_state.get("transcription_language", "Auto-detect")),
+            help="Auto-detect picks the language for each segment, so mixed English, Ukrainian and Russian works. "
+            "Pick one language only if the meeting is entirely in it. The AI bot uses WHISPER_LANGUAGE on its host.",
+        )
+        st.caption(
+            f"Model: {os.getenv('WHISPER_MODEL') or 'automatic (large-v3-turbo on GPU, small on CPU)'} · "
+            f"Audio cleanup: {'off' if os.getenv('AUDIO_CLEANUP') == '0' else 'on'} · "
+            f"Spelling correction: {'off' if os.getenv('TRANSCRIPT_LLM_CORRECTION') == '0' else 'on'} · "
+            f"Vocabulary learning: {'off' if os.getenv('VOCABULARY_LEARNING') == '0' else 'on'}"
+        )
+
+    st.subheader("Vocabulary")
+    with st.container(border=True):
+        st.caption(
+            "Names and terms that should be spelled exactly (one per line). Used by the transcriber and the "
+            "correction pass. Stored on the machine that runs the transcription."
+        )
+        current = VOCABULARY_FILE.read_text(encoding="utf-8") if VOCABULARY_FILE.is_file() else ""
+        edited = st.text_area("Your terms", value=current, height=200, label_visibility="collapsed")
+        if st.button("Save vocabulary", icon=":material/save:", disabled=edited == current):
+            VOCABULARY_FILE.write_text(edited.rstrip() + "\n", encoding="utf-8")
+            st.toast("Vocabulary saved.")
+            st.rerun()
+        learned = [t for t in vocabulary() if t not in current.splitlines()]
+        if learned:
+            with st.expander(f"Auto-learned terms ({len(learned)})"):
+                st.write(", ".join(learned))
+                st.caption(f"Managed in {LEARNED_FILE.name}; terms are added after they appear in two meetings.")
+
+    st.subheader("Ollama connection")
+    with st.container(border=True):
+        ollama_host = get_ollama_host()
+        api_key_configured = bool(get_setting("OLLAMA_API_KEY"))
+        st.caption(
+            f"Endpoint: {ollama_target_label(ollama_host)} · "
+            f"API key: {'configured' if api_key_configured else 'missing'}"
+        )
+        if st.button("Test connection", disabled=not api_key_configured, key="test_ollama_connection"):
+            try:
+                with st.spinner("Checking Ollama API access..."):
+                    get_ollama_client().list()
+            except Exception as error:
+                status_code = getattr(error, "status_code", None)
+                if status_code == 401:
+                    message = "Ollama rejected the API key. Check OLLAMA_API_KEY in app secrets."
+                elif status_code == 402:
+                    message = "Ollama reports that this account needs usage credits."
+                elif status_code == 429:
+                    message = "Ollama rate limit reached. Try again later."
+                else:
+                    message = (
+                        f"Could not reach {ollama_target_label(ollama_host)} "
+                        f"({type(error).__name__}). Check OLLAMA_HOST and network access."
+                    )
+                st.error(message)
+            else:
+                st.success("Connected to Ollama API.")
+
+
+PAGE_DASHBOARD = st.Page(dashboard_page, title="Dashboard", icon=":material/dashboard:", url_path="dashboard", default=True)
+PAGE_MEETINGS = st.Page(meetings_page, title="My Meetings", icon=":material/event_note:", url_path="meetings")
+PAGE_CHAT = st.Page(chat_page, title="AI Chat", icon=":material/chat:", url_path="chat")
+PAGE_ACTIONS = st.Page(actions_page, title="Action Items", icon=":material/task_alt:", url_path="actions")
+PAGE_SETTINGS = st.Page(settings_page, title="Settings", icon=":material/settings:", url_path="settings")
+
+navigation = st.navigation([PAGE_DASHBOARD, PAGE_MEETINGS, PAGE_CHAT, PAGE_ACTIONS, PAGE_SETTINGS])
+with st.sidebar:
+    st.caption(f"Signed in as {st.session_state['supabase_user']}" if st.session_state.get("supabase_user") else "")
+    st.caption("Created by Daryna Ladanovska · Version 1.1")
+navigation.run()

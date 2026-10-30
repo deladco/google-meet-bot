@@ -144,21 +144,21 @@ def _drop_repeated_loops(entries):
     return kept
 
 
-def _transcribe_samples(whisper, samples, meeting_time, vad_filter):
+def _transcribe_samples(whisper, samples, meeting_time, vad_filter, language=None):
     global _FORCE_CPU
     try:
-        return _transcribe_once(whisper, samples, meeting_time, vad_filter)
+        return _transcribe_once(whisper, samples, meeting_time, vad_filter, language)
     except RuntimeError as error:
         if _FORCE_CPU or not any(k in str(error).casefold() for k in ("cublas", "cudnn", "cuda")):
             raise
         # Broken/missing GPU runtime: retry on CPU instead of failing the meeting.
         _FORCE_CPU = True
         _whisper_model.cache_clear()
-        return _transcribe_once(_whisper_model(), samples, meeting_time, vad_filter)
+        return _transcribe_once(_whisper_model(), samples, meeting_time, vad_filter, language)
 
 
-def _transcribe_once(whisper, samples, meeting_time, vad_filter):
-    language = os.getenv("WHISPER_LANGUAGE") or None
+def _transcribe_once(whisper, samples, meeting_time, vad_filter, language=None):
+    language = language or os.getenv("WHISPER_LANGUAGE") or None
     terms = vocabulary()
     segments, _ = whisper.transcribe(
         _normalize_level(samples),
@@ -194,7 +194,7 @@ def _transcribe_once(whisper, samples, meeting_time, vad_filter):
 
 
 def process_uploaded_recording(
-    file_bytes, filename, consent_confirmed, owner_id=None, owner_email=None
+    file_bytes, filename, consent_confirmed, owner_id=None, owner_email=None, language=None
 ):
     if not consent_confirmed:
         raise ValueError("Confirm participant consent before processing a recording.")
@@ -242,6 +242,7 @@ def process_uploaded_recording(
                 samples,
                 meeting_time,
                 vad_filter=True,
+                language=language,
             )
             if not entries:
                 entries = _transcribe_samples(
@@ -249,6 +250,7 @@ def process_uploaded_recording(
                     samples,
                     meeting_time,
                     vad_filter=False,
+                    language=language,
                 )
 
             if not entries:
