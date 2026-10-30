@@ -67,4 +67,4 @@ Vocabulary is learned automatically: after each meeting, names and terms found i
 
 ## App layout
 
-The Streamlit app has five pages: **Dashboard** (metrics, recent meetings, quick question, and the bot/record/upload flow), **My Meetings** (searchable history with minutes, transcript and action items), **AI Chat** (questions across your transcripts, needs `supabase_migration_rag.sql`), **Action Items** (all tasks with owner/deadline filters and CSV export) and **Settings** (account, transcription language, vocabulary, Ollama connection).
+The Streamlit app has five pages: **Dashboard** (metrics, recent meetings, quick question, and the bot/record/upload flow), **My Meetings** (searchable history with minutes, transcript and action items), **Ask AI** (questions across your transcripts, needs `supabase_migration_rag.sql`), **Action Items** (all tasks with owner/deadline filters and CSV export) and **Settings** (account, transcription language, vocabulary, Ollama connection).

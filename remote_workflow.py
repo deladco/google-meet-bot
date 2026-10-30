@@ -194,8 +194,12 @@ def _transcribe_once(whisper, samples, meeting_time, vad_filter, language=None):
 
 
 def process_uploaded_recording(
-    file_bytes, filename, consent_confirmed, owner_id=None, owner_email=None, language=None
+    file_bytes, filename, consent_confirmed, owner_id=None, owner_email=None, language=None, progress=None
 ):
+    def step(message):
+        if progress:
+            progress(message)
+
     if not consent_confirmed:
         raise ValueError("Confirm participant consent before processing a recording.")
     if not file_bytes:
@@ -234,6 +238,7 @@ def process_uploaded_recording(
             if samples.size == 0:
                 raise ValueError("No decodable audio was found in the upload.")
 
+            step("Converting speech to text")
             whisper = _whisper_model()
             diarization_samples = samples
             samples = clean_audio(samples)
@@ -287,6 +292,7 @@ def process_uploaded_recording(
 
             diarization_status = "unavailable"
             hf_token = get_setting("HF_TOKEN")
+            step("Identifying who is speaking")
             if hf_token:
                 try:
                     wav_path = Path(temp_dir) / "diarization.wav"
@@ -313,6 +319,7 @@ def process_uploaded_recording(
                     error="HF_TOKEN is not configured; speakers remain Unknown.",
                 )
 
+        step("Checking spelling of names and terms")
         history.update_status(session_id, "correcting")
         entries, corrected_count = correct_transcript(entries)
         if corrected_count:
@@ -338,9 +345,11 @@ def process_uploaded_recording(
                 "diarization_status": diarization_status,
             }
 
+        step("Writing the summary and action items")
         history.update_status(session_id, "analyzing")
         minutes = analyze_meeting(transcript_path)
         markdown = render_markdown(minutes)
+        step("Saving notes")
         notes_path.write_text(markdown, encoding="utf-8")
         minutes_json = json.dumps(minutes, indent=2, ensure_ascii=False)
         minutes_path.write_text(minutes_json, encoding="utf-8")

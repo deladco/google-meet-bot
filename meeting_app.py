@@ -277,7 +277,11 @@ def open_meeting(meeting_id):
 
 def process_audio(audio_bytes, filename, consent):
     language = LANGUAGES.get(st.session_state.get("transcription_language", "Auto-detect"))
-    with st.spinner("Transcribing, diarizing, and generating meeting minutes..."):
+    with st.status("Processing your recording", expanded=True) as status:
+        def progress(message):
+            status.update(label=message)
+            st.write(f":material/check: {message}")
+
         result = process_uploaded_recording(
             audio_bytes,
             filename,
@@ -285,8 +289,12 @@ def process_audio(audio_bytes, filename, consent):
             owner_id=viewer_id,
             owner_email=viewer_email,
             language=language,
+            progress=progress,
         )
-    save_to_cloud(result)
+        if auth_db.is_configured() and st.session_state.get("supabase_user"):
+            progress("Saving to your account")
+        save_to_cloud(result)
+        status.update(label="Done", state="complete", expanded=False)
     refresh_meetings()
     return result
 
@@ -339,7 +347,7 @@ def show_processing_result(result):
         st.success(f"Meeting processed: {result['meeting_id']}")
         st.caption(
             f"{result['action_item_count']} action items · "
-            f"Speaker diarization: {result['diarization_status']}"
+            f"Speaker identification: {result['diarization_status'].replace('unavailable', 'not available')}"
         )
         notes_path = Path(result["notes_path"])
         if notes_path.exists():
@@ -546,6 +554,14 @@ def show_sources(passages):
 # ---------------------------------------------------------------- pages
 
 
+def first_meeting_help_inline():
+    st.info(
+        "No meetings yet. Open **New meeting** above, choose a source (AI bot, microphone, "
+        "or upload a file), tick the consent box and start. Your summary and action items "
+        "will appear here when processing finishes."
+    )
+
+
 def dashboard_page():
     meetings = load_meetings()
     actions = [a for m in meetings for a in minutes_list(m, "action_items")]
@@ -567,24 +583,11 @@ def dashboard_page():
         if view_all.button("View all", key="view_all", type="tertiary"):
             st.switch_page(PAGE_MEETINGS)
         if not meetings:
-            st.info("No meetings yet. Send the bot to a meeting or upload a recording below.")
+            first_meeting_help_inline()
         for meeting in meetings[:3]:
-            with st.container(border=True):
-                text_column, when_column = st.columns([4, 1], vertical_alignment="center")
-                text_column.markdown(f"**{meeting_title(meeting)}**")
-                if meeting["minutes"]:
-                    detail = (
-                        f"{len(minutes_list(meeting, 'decisions'))} decisions · "
-                        f"{len(minutes_list(meeting, 'action_items'))} actions"
-                    )
-                else:
-                    detail = status_label(meeting)
-                text_column.caption(detail)
-                when_column.caption(when_label(meeting["recorded_at"]))
-                if when_column.button("Open", key=f"open_{meeting['id']}", type="tertiary"):
-                    open_meeting(meeting["id"])
+            meeting_card(meeting, "recent")
     with ask_column:
-        st.subheader("Ask your meetings")
+        st.subheader("Ask AI")
         with st.container(border=True):
             quick_question = st.text_input(
                 "Question",
@@ -598,29 +601,84 @@ def dashboard_page():
             st.caption("Answers grounded in your private transcripts")
 
 
+DATE_FILTERS = {"Any time": None, "Last 7 days": 7, "Last 30 days": 30, "Last 90 days": 90}
+SORT_OPTIONS = ["Newest first", "Oldest first", "Most action items", "Title A-Z"]
+
+
+def meeting_card(meeting, key_prefix, show_open=True):
+    """Compact, mobile-friendly summary of one meeting."""
+    with st.container(border=True):
+        st.markdown(f"**{meeting_title(meeting)}**")
+        if meeting["minutes"]:
+            detail = (
+                f"{len(minutes_list(meeting, 'decisions'))} decisions · "
+                f"{len(minutes_list(meeting, 'action_items'))} actions"
+            )
+        else:
+            detail = status_label(meeting)
+        st.caption(f"{when_label(meeting['recorded_at'])} · {detail}")
+        if show_open and st.button("Open", key=f"{key_prefix}_{meeting['id']}", type="tertiary", icon=":material/arrow_forward:"):
+            open_meeting(meeting["id"])
+
+
+def first_meeting_help():
+    with st.container(border=True):
+        st.markdown("#### Add your first meeting")
+        st.markdown(
+            "1. Go to the **Dashboard** and open **New meeting**.\n"
+            "2. Pick a source: send the bot to a Google Meet, Zoom or Teams link, record with your "
+            "microphone, or upload an audio or video file.\n"
+            "3. Tick the consent box and start. A summary, decisions and action items appear here "
+            "when processing finishes."
+        )
+        if st.button("Go to Dashboard", icon=":material/add_circle:", type="primary"):
+            st.switch_page(PAGE_DASHBOARD)
+
+
 def meetings_page():
+    meetings = load_meetings()
+    selected_id = st.session_state.get("open_meeting")
+    selected = next((m for m in meetings if m["id"] == selected_id), None)
+    if selected:
+        if st.button("Back to all meetings", icon=":material/arrow_back:", type="tertiary"):
+            st.session_state.pop("open_meeting", None)
+            st.rerun()
+        show_meeting(selected)
+        return
+
     st.title("My Meetings")
-    top_left, top_middle, top_right = st.columns([3, 1, 1], vertical_alignment="bottom")
-    query = top_left.text_input(
+    if not meetings:
+        st.info("No meetings yet.")
+        first_meeting_help()
+        return
+
+    query = st.text_input(
         "Search",
-        placeholder="Search titles, notes, transcripts, owners or deadlines",
+        placeholder="Search by title, topic, person or any word said",
         label_visibility="collapsed",
         icon=":material/search:",
     )
-    meetings = load_meetings()
-    statuses = sorted({m["status"] for m in meetings})
-    status_filter = top_middle.selectbox(
-        "Status", ["All", *statuses], label_visibility="collapsed", format_func=lambda s: s if s == "All" else s.replace("_", " ").capitalize()
-    )
-    if top_right.button("Refresh", icon=":material/refresh:", width="stretch"):
+    with st.expander("Filter and sort", icon=":material/tune:"):
+        statuses = sorted({m["status"] for m in meetings})
+        status_filter = st.selectbox(
+            "Status",
+            ["All", *statuses],
+            format_func=lambda s: "All" if s == "All" else s.replace("_", " ").capitalize(),
+        )
+        date_filter = st.selectbox("Date", list(DATE_FILTERS))
+        sort_by = st.selectbox("Sort by", SORT_OPTIONS)
+    if st.button("Refresh", icon=":material/refresh:", type="tertiary"):
         refresh_meetings()
         st.rerun()
 
     needle = query.strip().casefold()
+    days = DATE_FILTERS[date_filter]
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days) if days else None
     filtered = [
         m
         for m in meetings
         if (status_filter == "All" or m["status"] == status_filter)
+        and (cutoff is None or (parse_when(m["recorded_at"]) or datetime.min.replace(tzinfo=timezone.utc)) >= cutoff)
         and (
             not needle
             or needle in meeting_title(m).casefold()
@@ -629,41 +687,19 @@ def meetings_page():
             or needle in m["transcript"].casefold()
         )
     ]
-    if not meetings:
-        st.info("No meetings yet. Record one from the Dashboard.")
-        return
+    if sort_by == "Oldest first":
+        filtered.reverse()
+    elif sort_by == "Most action items":
+        filtered.sort(key=lambda m: len(minutes_list(m, "action_items")), reverse=True)
+    elif sort_by == "Title A-Z":
+        filtered.sort(key=lambda m: meeting_title(m).casefold())
+
     if not filtered:
-        st.info("No meetings match your search.")
+        st.info("No meetings match. Try a different word, or set Date to Any time and Status to All.")
         return
-
-    rows = [
-        {
-            "When": when_full(m["recorded_at"]),
-            "Meeting": meeting_title(m),
-            "Status": status_label(m),
-            "Decisions": len(minutes_list(m, "decisions")),
-            "Actions": len(minutes_list(m, "action_items")),
-            **({"Recorded by": m["owner_email"] or "Unknown"} if viewer_sees_all and auth_db.is_configured() else {}),
-        }
-        for m in filtered
-    ]
-    st.dataframe(rows, hide_index=True, width="stretch")
-
-    ids = [m["id"] for m in filtered]
-    preferred = st.session_state.pop("open_meeting", None)
-    if preferred in ids:
-        st.session_state["meeting_select"] = preferred
-    elif st.session_state.get("meeting_select") not in ids:
-        st.session_state["meeting_select"] = ids[0]
-    selected_id = st.selectbox(
-        "Meeting",
-        ids,
-        key="meeting_select",
-        format_func=lambda i: f"{when_full(next(m for m in filtered if m['id'] == i)['recorded_at'])} · "
-        f"{meeting_title(next(m for m in filtered if m['id'] == i))}",
-    )
-    meeting = next(m for m in filtered if m["id"] == selected_id)
-    show_meeting(meeting)
+    st.caption(f"{len(filtered)} of {len(meetings)} meetings")
+    for meeting in filtered:
+        meeting_card(meeting, "list")
 
 
 def show_meeting(meeting):
@@ -676,57 +712,57 @@ def show_meeting(meeting):
     if meeting["error"]:
         st.warning(meeting["error"])
 
-    minutes_tab, transcript_tab, actions_tab = st.tabs(["Minutes", "Transcript", "Action items"])
     minutes = meeting["minutes"]
-    with minutes_tab:
-        if not minutes:
-            st.info("Minutes have not been generated for this meeting.")
+    if not minutes:
+        st.info("A summary has not been generated for this meeting yet.")
+    else:
+        st.subheader("Summary")
+        st.write(minutes.get("summary") or "No summary available.")
+
+        decisions = minutes_list(meeting, "decisions")
+        st.subheader(f"Decisions ({len(decisions)})")
+        if decisions:
+            for decision in decisions:
+                st.markdown(f"- {decision.get('decision', '')}")
         else:
-            if minutes.get("summary"):
-                st.subheader("Summary")
-                st.write(minutes["summary"])
-            topics = minutes_list(meeting, "discussion_topics")
-            if topics:
-                st.subheader("Discussion topics")
-                for topic in topics:
-                    with st.expander(str(topic.get("topic", "Topic"))):
-                        st.write(topic.get("details", ""))
-            decisions = minutes_list(meeting, "decisions")
-            if decisions:
-                st.subheader("Decisions")
-                for decision in decisions:
-                    st.markdown(f"- {decision.get('decision', '')}")
-            questions = minutes_list(meeting, "unresolved_questions")
-            if questions:
-                st.subheader("Open questions")
-                for question in questions:
-                    st.markdown(f"- {question.get('question', '')}")
-        if meeting["notes"]:
-            with st.expander("Full notes with transcript references"):
-                st.markdown(meeting["notes"])
-            st.download_button(
-                "Download notes (.md)",
-                data=meeting["notes"],
-                file_name=f"meeting_notes_{meeting['id']}.md",
-                mime="text/markdown",
-                key=f"notes_{meeting['id']}",
-            )
-        if minutes:
-            st.download_button(
-                "Download structured minutes (.json)",
-                data=json.dumps(minutes, indent=2, ensure_ascii=False),
-                file_name=f"meeting_minutes_{meeting['id']}.json",
-                mime="application/json",
-                key=f"minutes_{meeting['id']}",
-            )
-    with transcript_tab:
-        entries = parse_transcript(meeting["transcript"])
+            st.caption("No decisions were recorded.")
+
+        items = minutes_list(meeting, "action_items")
+        st.subheader(f"Action items ({len(items)})")
+        if items:
+            for item in items:
+                with st.container(border=True):
+                    st.markdown(f"**{item.get('task', '')}**")
+                    st.caption(
+                        f"Owner: {item.get('owner') or 'Not specified'} · "
+                        f"Deadline: {item.get('deadline') or 'Not specified'}"
+                    )
+        else:
+            st.caption("No action items were captured.")
+
+        topics = minutes_list(meeting, "discussion_topics")
+        if topics:
+            st.subheader("Discussion topics")
+            for topic in topics:
+                with st.expander(str(topic.get("topic", "Topic"))):
+                    st.write(topic.get("details", ""))
+        questions = minutes_list(meeting, "unresolved_questions")
+        if questions:
+            st.subheader("Open questions")
+            for question in questions:
+                st.markdown(f"- {question.get('question', '')}")
+
+    entries = parse_transcript(meeting["transcript"])
+    with st.expander(f"Transcript ({len(entries)} lines)" if entries else "Transcript", icon=":material/notes:"):
         if not entries:
             st.info("No transcript available (no speech was captured, or the file is gone from this server).")
         else:
             speakers = sorted({str(e.get("speaker", "Unknown")) for e in entries})
-            chosen = st.multiselect("Speakers", speakers, default=speakers, key=f"speakers_{meeting['id']}")
-            with st.container(height=520):
+            if len(speakers) > 1:
+                chosen = st.multiselect("Show speakers", speakers, default=speakers, key=f"speakers_{meeting['id']}")
+            else:
+                chosen = speakers
+            with st.container(height=480):
                 for entry in entries:
                     speaker = str(entry.get("speaker", "Unknown"))
                     if speaker not in chosen:
@@ -734,40 +770,56 @@ def show_meeting(meeting):
                     start = entry.get("start")
                     stamp = f"{int(start) // 60:02d}:{int(start) % 60:02d}" if isinstance(start, (int, float)) else ""
                     st.markdown(f"`{stamp}` **{speaker}** {entry.get('text', '')}")
+
+    with st.expander("Downloads", icon=":material/download:"):
+        if meeting["notes"]:
+            st.download_button(
+                "Notes (.md)",
+                data=meeting["notes"],
+                file_name=f"meeting_notes_{meeting['id']}.md",
+                mime="text/markdown",
+                key=f"notes_{meeting['id']}",
+                width="stretch",
+            )
+        if minutes:
+            st.download_button(
+                "Structured minutes (.json)",
+                data=json.dumps(minutes, indent=2, ensure_ascii=False),
+                file_name=f"meeting_minutes_{meeting['id']}.json",
+                mime="application/json",
+                key=f"minutes_{meeting['id']}",
+                width="stretch",
+            )
+        if entries:
             readable = "\n".join(
                 f"[{e.get('timestamp', '')}] {e.get('speaker', 'Unknown')}: {e.get('text', '')}" for e in entries
             )
-            download_columns = st.columns(2)
-            download_columns[0].download_button(
-                "Download transcript (.txt)",
+            st.download_button(
+                "Transcript (.txt)",
                 data=readable,
                 file_name=f"transcript_{meeting['id']}.txt",
                 mime="text/plain",
                 key=f"txt_{meeting['id']}",
+                width="stretch",
             )
-            download_columns[1].download_button(
-                "Download transcript (.jsonl)",
+            st.download_button(
+                "Transcript (.jsonl)",
                 data=meeting["transcript"],
                 file_name=f"transcript_{meeting['id']}.jsonl",
                 mime="application/jsonl",
                 key=f"jsonl_{meeting['id']}",
-            )
-    with actions_tab:
-        items = minutes_list(meeting, "action_items")
-        if items:
-            st.dataframe(
-                [{"Task": a.get("task"), "Owner": a.get("owner"), "Deadline": a.get("deadline")} for a in items],
-                hide_index=True,
                 width="stretch",
             )
-        else:
-            st.caption("No action items captured.")
 
 
 def chat_page():
-    st.title("AI Chat")
-    st.caption("Ask questions across your meeting transcripts. Answers cite their sources.")
+    st.title("Ask AI")
+    st.caption("Ask a question in plain words. Answers come from your own meetings and show where they were found.")
     messages = st.session_state.setdefault("chat_messages", [])
+    if not load_meetings():
+        st.info("There is nothing to ask about yet. Add a meeting first, then come back here.")
+        first_meeting_help()
+        return
 
     pending = st.session_state.pop("pending_question", None)
     typed = st.chat_input("Ask about decisions, tasks, deadlines or open questions")
@@ -826,29 +878,36 @@ def actions_page():
                 }
             )
     if not rows:
-        st.info("No action items yet. They appear here after a meeting's minutes are generated.")
+        st.info(
+            "No action items yet. Tasks assigned in your meetings are collected here "
+            "after a meeting's summary is generated."
+        )
+        if not meetings:
+            first_meeting_help()
         return
 
     unassigned = sum(r["Owner"].strip().casefold() in {"", "not specified"} for r in rows)
     with_deadline = sum(r["Deadline"].strip().casefold() not in {"", "not specified"} for r in rows)
     metric_columns = st.columns(3)
     metric_columns[0].metric("Total", len(rows), border=True)
-    metric_columns[1].metric("Without an owner", unassigned, border=True)
-    metric_columns[2].metric("With a deadline", with_deadline, border=True)
+    metric_columns[1].metric("No owner", unassigned, border=True)
+    metric_columns[2].metric("Has deadline", with_deadline, border=True)
 
-    filter_left, filter_right = st.columns([2, 1])
-    needle = filter_left.text_input(
+    needle = st.text_input(
         "Search tasks", label_visibility="collapsed", placeholder="Search tasks", icon=":material/search:"
     ).strip().casefold()
     owners = sorted({r["Owner"] for r in rows})
-    chosen_owners = filter_right.multiselect("Owner", owners, placeholder="All owners")
+    chosen_owners = st.multiselect("Owner", owners, placeholder="All owners")
     shown = [
         r
         for r in rows
         if (not needle or needle in r["Task"].casefold() or needle in r["Meeting"].casefold())
         and (not chosen_owners or r["Owner"] in chosen_owners)
     ]
-    st.dataframe(shown, hide_index=True, width="stretch")
+    for row in shown:
+        with st.container(border=True):
+            st.markdown(f"**{row['Task']}**")
+            st.caption(f"Owner: {row['Owner']} · Deadline: {row['Deadline']} · {row['Meeting']} ({row['Date']})")
 
     buffer = io.StringIO()
     writer = csv.DictWriter(buffer, fieldnames=list(rows[0]))
@@ -926,7 +985,7 @@ def settings_page():
                 st.write(", ".join(learned))
                 st.caption(f"Managed in {LEARNED_FILE.name}; terms are added after they appear in two meetings.")
 
-    st.subheader("Ollama connection")
+    st.subheader("AI service connection")
     with st.container(border=True):
         ollama_host = get_ollama_host()
         api_key_configured = bool(get_setting("OLLAMA_API_KEY"))
@@ -958,7 +1017,7 @@ def settings_page():
 
 PAGE_DASHBOARD = st.Page(dashboard_page, title="Dashboard", icon=":material/dashboard:", url_path="dashboard", default=True)
 PAGE_MEETINGS = st.Page(meetings_page, title="My Meetings", icon=":material/event_note:", url_path="meetings")
-PAGE_CHAT = st.Page(chat_page, title="AI Chat", icon=":material/chat:", url_path="chat")
+PAGE_CHAT = st.Page(chat_page, title="Ask AI", icon=":material/chat:", url_path="chat")
 PAGE_ACTIONS = st.Page(actions_page, title="Action Items", icon=":material/task_alt:", url_path="actions")
 PAGE_SETTINGS = st.Page(settings_page, title="Settings", icon=":material/settings:", url_path="settings")
 
@@ -980,6 +1039,13 @@ label:has(input[type="checkbox"]) { transition: background-color .15s ease, bord
 label:has(input[type="checkbox"]):hover { color: #B8B8FF; }
 [data-testid="stBaseButton-pills"]:hover, [data-testid="stBaseButton-segmented_control"]:hover {
   background-color: #2B2F45; border-color: #7C7CF0;
+}
+@media (max-width: 640px) {
+  .block-container { padding: 3.5rem 1rem 5rem; }
+  .stDownloadButton > button, .stFormSubmitButton > button { width: 100%; }
+  [data-testid="stMetricValue"] { font-size: 1.5rem; }
+  [data-testid="stChatInput"] { padding-bottom: .5rem; }
+  h1 { font-size: 1.7rem !important; }
 }
 </style>
 """
