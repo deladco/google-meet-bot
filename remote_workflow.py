@@ -30,12 +30,38 @@ SAMPLE_RATE = 16000
 ALLOWED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".m4a", ".flac", ".ogg", ".mp4", ".webm"}
 
 
+_FORCE_CPU = False
+
+
+def _add_cuda_dll_dirs():
+    # pip-installed CUDA 12 cuBLAS/cuDNN (nvidia-*-cu12) are not on PATH by default on Windows.
+    if os.name != "nt":
+        return
+    for base in map(Path, sys.path):
+        nvidia = base / "nvidia"
+        if nvidia.is_dir():
+            for bin_dir in nvidia.glob("*/bin"):
+                os.add_dll_directory(str(bin_dir))
+                os.environ["PATH"] = str(bin_dir) + os.pathsep + os.environ["PATH"]
+            return
+
+
 @lru_cache(maxsize=1)
 def _whisper_model():
     from faster_whisper import WhisperModel
 
-    model_name = os.getenv("WHISPER_MODEL", "base")
-    return WhisperModel(model_name, device="cpu", compute_type="int8")
+    import ctranslate2
+
+    _add_cuda_dll_dirs()
+    # GPU: large-v3-turbo is far more accurate for Ukrainian/Russian than base. CPU hosts keep a smaller model.
+    has_gpu = ctranslate2.get_cuda_device_count() > 0 and not _FORCE_CPU
+    device = "cpu" if _FORCE_CPU else (os.getenv("WHISPER_DEVICE") or ("cuda" if has_gpu else "cpu"))
+    default_model = "large-v3-turbo" if device == "cuda" else "small"
+    model_name = os.getenv("WHISPER_MODEL") or default_model
+    compute_type = os.getenv("WHISPER_COMPUTE_TYPE") or ("float16" if device == "cuda" else "int8")
+    if _FORCE_CPU:
+        compute_type = "int8"
+    return WhisperModel(model_name, device=device, compute_type=compute_type)
 
 
 def _release_whisper():
@@ -118,11 +144,28 @@ def _drop_repeated_loops(entries):
 
 
 def _transcribe_samples(whisper, samples, meeting_time, vad_filter):
+    global _FORCE_CPU
+    try:
+        return _transcribe_once(whisper, samples, meeting_time, vad_filter)
+    except RuntimeError as error:
+        if _FORCE_CPU or not any(k in str(error).casefold() for k in ("cublas", "cudnn", "cuda")):
+            raise
+        # Broken/missing GPU runtime: retry on CPU instead of failing the meeting.
+        _FORCE_CPU = True
+        _whisper_model.cache_clear()
+        return _transcribe_once(_whisper_model(), samples, meeting_time, vad_filter)
+
+
+def _transcribe_once(whisper, samples, meeting_time, vad_filter):
+    language = os.getenv("WHISPER_LANGUAGE") or None
     segments, _ = whisper.transcribe(
         _normalize_level(samples),
-        beam_size=3,
-        language=os.getenv("WHISPER_LANGUAGE") or None,
+        beam_size=5,
+        language=language,
+        # Without a fixed language, detect it per segment so mixed English/Ukrainian/Russian speech works.
+        multilingual=language is None,
         vad_filter=vad_filter,
+        vad_parameters={"min_silence_duration_ms": 500, "speech_pad_ms": 300},
         condition_on_previous_text=False,
         no_speech_threshold=0.6,
         log_prob_threshold=-1.0,
