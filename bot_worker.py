@@ -151,6 +151,7 @@ def _click_first(page, labels, timeout=1500):
 
 
 def _fill_name(page, name):
+    """Fills the guest name box and confirms the value stuck (Meet re-renders this page)."""
     for locator in (
         page.get_by_placeholder("Your name"),
         page.get_by_placeholder("Enter your name"),
@@ -158,8 +159,11 @@ def _fill_name(page, name):
         page.locator("input[type=text]"),
     ):
         try:
-            locator.first.fill(name, timeout=4000)
-            return True
+            field = locator.first
+            field.wait_for(state="visible", timeout=6000)
+            field.fill(name, timeout=4000)
+            if field.input_value(timeout=1000) == name:
+                return True
         except Exception:
             continue
     return False
@@ -172,14 +176,18 @@ def _zoom_web_url(url):
 def join(page, url, name):
     platform = meeting_bot.platform_of(url)
     page.goto(_zoom_web_url(url) if platform == "zoom" else url, wait_until="domcontentloaded")
-    page.wait_for_timeout(4000)
 
     if platform == "teams":
+        page.wait_for_timeout(4000)
         _click_first(page, ["Continue on this browser", "Join on the web instead"], 6000)
         page.wait_for_timeout(3000)
-    # No camera or microphone for the bot.
-    _click_first(page, ["Continue without microphone and camera", "Continue without audio or video"])
+    # Fill the name as soon as the box exists, then again after the page settles.
     _fill_name(page, name)
+    # No camera or microphone for the bot.
+    _click_first(page, ["Continue without microphone and camera", "Continue without audio or video"], 800)
+    page.wait_for_timeout(1500)
+    if not _fill_name(page, name) and platform == "meet":
+        print("Could not fill the bot name on the join page", flush=True)
     if platform == "zoom":
         _click_first(page, ["Join Audio by Computer", "Join"], 3000)
     if not _click_first(page, ["Ask to join", "Join now", "Join"], 4000):
