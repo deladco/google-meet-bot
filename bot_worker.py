@@ -11,8 +11,8 @@ Needs in .env: SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL) and SUPABASE_SERVICE_K
 Audio capture: Windows uses WASAPI loopback (default speakers); Linux needs
 PulseAudio and ffmpeg (see Dockerfile.worker).
 """
+import json
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -239,6 +239,15 @@ def page_text(page):
         return ""
 
 
+def signed_in():
+    """True only if the saved browser state holds a real Google session, not just a leftover file."""
+    try:
+        cookies = json.loads(STATE_FILE.read_text(encoding="utf-8")).get("cookies", [])
+    except Exception:
+        return False
+    return any(c.get("name") in ("SID", "SAPISID", "__Secure-1PSID") for c in cookies)
+
+
 def denied_reason(page):
     body = page_text(page).lower().replace("’", "'")
     if not any(text.lower().replace("’", "'") in body for text in DENIED_TEXTS):
@@ -247,12 +256,14 @@ def denied_reason(page):
         return "Nobody in the meeting admitted the bot in time. Keep the meeting open and admit 'AI Assistant' when it asks to join."
     if "denied" in body:
         return "The host denied the bot's request to join. Send the bot again and admit it from the meeting."
-    if not STATE_FILE.exists():
-        return "The meeting only allows signed-in guests. Run `python bot_login.py` once to sign the bot in to a Google account."
+    if not signed_in():
+        return (
+            "The meeting does not allow anonymous guests and the bot is not signed in to Google. "
+            "Run `python bot_login.py` to sign it in, then invite that Google account to the meeting."
+        )
     return (
-        "The meeting only allows invited accounts (or the host disabled anonymous joining). "
-        "Invite the bot's Google account to the calendar event or add it as a participant, "
-        "or ask the host to allow everyone with the link."
+        "The meeting only allows invited accounts. Invite the bot's Google account to the "
+        "calendar event or add it as a participant, or ask the host to allow everyone with the link."
     )
 
 
