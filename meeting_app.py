@@ -1671,6 +1671,52 @@ hr { background: linear-gradient(90deg, transparent, rgba(255,227,71,.35), trans
 .st-key-new_meeting { background: linear-gradient(135deg, #5A4F1F 0%, #2E3A5C 100%) !important; }
 [data-testid="stMetricLabel"] { color: #AEB8D6; }
 [data-testid="stMetricValue"] { color: #FFE347; }
+/* unified button system: every button kind shares the same pill look */
+[data-testid^="stBaseButton-"]:not([data-testid="stBaseButton-borderlessIcon"]):not([data-testid="stBaseButton-minimal"]):not([data-testid="stBaseButton-headerNoPadding"]):not([data-testid="stBaseButton-tertiary"]),
+[data-testid^="stBaseLinkButton-"], [data-testid="stPopoverButton"] {
+  background: var(--bg); color: #E6E8F2; border: none !important; border-radius: 999px !important;
+  box-shadow: var(--raise-sm); font-weight: 500;
+  transition: box-shadow .3s cubic-bezier(.4,0,.2,1), background .3s ease, color .3s ease, transform .3s ease;
+}
+[data-testid^="stBaseButton-"]:not([data-testid="stBaseButton-borderlessIcon"]):not([data-testid="stBaseButton-minimal"]):not([data-testid="stBaseButton-headerNoPadding"]):not([data-testid="stBaseButton-tertiary"]):hover:not(:disabled),
+[data-testid^="stBaseLinkButton-"]:hover, [data-testid="stPopoverButton"]:hover {
+  background: #2A2E38; color: var(--neon); box-shadow: var(--raise), 0 0 12px rgba(255,227,71,.18); transform: translateY(-1px);
+}
+[data-testid^="stBaseButton-"]:active:not(:disabled), [data-testid^="stBaseLinkButton-"]:active { box-shadow: var(--inset) !important; transform: none; }
+[data-testid="stBaseButton-primary"], [data-testid="stBaseButton-primaryFormSubmit"], [data-testid^="stBaseLinkButton-primary"] {
+  background: linear-gradient(145deg, #FFEE70, #E6B800) !important; color: #14100A !important; font-weight: 600;
+  box-shadow: var(--raise-sm), 0 0 16px rgba(255,227,71,.4);
+}
+[data-testid="stBaseButton-primary"]:hover:not(:disabled), [data-testid="stBaseButton-primaryFormSubmit"]:hover:not(:disabled) {
+  background: linear-gradient(145deg, #FFF39A, #F2C400) !important; color: #14100A !important; box-shadow: var(--raise), 0 0 22px rgba(255,227,71,.55);
+}
+[data-testid="stBaseButton-primary"]:disabled, [data-testid="stBaseButton-primaryFormSubmit"]:disabled {
+  background: linear-gradient(145deg, #5A4A12, #3F340C) !important; color: #A8955A !important;
+  border: 1px dashed rgba(255,227,71,.35) !important; box-shadow: var(--raise-sm); opacity: 1; cursor: not-allowed;
+}
+[data-testid^="stBaseButton-"]:disabled:not([data-testid*="primary"]) { color: #7C8090 !important; opacity: 1; cursor: not-allowed; }
+/* tertiary "Open / View all / Back" links: ghost pill, glow on hover */
+[data-testid="stBaseButton-tertiary"] {
+  background: transparent; color: #C9CEE0; border-radius: 999px !important; box-shadow: none; transition: all .3s ease;
+}
+[data-testid="stBaseButton-tertiary"]:hover:not(:disabled) { background: var(--bg); color: var(--neon); box-shadow: var(--raise-sm); }
+/* pills & segmented selection */
+[data-testid="stBaseButton-pillsActive"], [data-testid="stBaseButton-segmented_controlActive"] {
+  background: var(--bg) !important; color: var(--neon) !important; box-shadow: var(--inset), 0 0 0 1.5px rgba(255,227,71,.6), 0 0 14px rgba(255,227,71,.3) !important;
+}
+[data-testid="stBaseButton-pillsActive"], [data-testid="stBaseButton-segmented_controlActive"],
+[data-testid="stBaseButton-pills"], [data-testid="stBaseButton-segmented_control"] { border-radius: 999px !important; border: none !important; }
+/* file uploader, audio input, chat send */
+[data-testid="stFileUploaderDropzone"] {
+  background: var(--bg) !important; border: 1px dashed rgba(255,227,71,.35) !important; border-radius: 20px !important; box-shadow: var(--inset);
+}
+[data-testid="stFileUploaderDropzone"]:hover { box-shadow: var(--inset), 0 0 14px rgba(255,227,71,.25); }
+[data-testid="stAudioInput"] { background: var(--bg) !important; border: none !important; border-radius: 999px !important; box-shadow: var(--inset); }
+[data-testid="stAudioInputActionButton"], [data-testid="stChatInputSubmitButton"] {
+  background: var(--bg) !important; border-radius: 999px !important; box-shadow: var(--raise-sm); color: var(--neon) !important;
+}
+[data-testid="stChatInputSubmitButton"]:hover:not(:disabled), [data-testid="stAudioInputActionButton"]:hover { box-shadow: var(--raise), 0 0 12px rgba(255,227,71,.4); }
+[data-testid^="stBaseButton-"]:focus-visible, [data-testid^="stBaseLinkButton-"]:focus-visible { outline: none !important; box-shadow: var(--neon-glow) !important; }
 @media (max-width: 640px) {
   .block-container { padding: 3.5rem 1rem 5rem; }
   .stDownloadButton > button, .stFormSubmitButton > button { width: 100%; }
