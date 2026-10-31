@@ -1523,7 +1523,7 @@ HOVER_CSS = """
   --accent: #D9A400;
 }
 .stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"] { background: var(--bg) !important; }
-.block-container { max-width: 1100px; padding-top: 2.5rem; }
+.block-container { max-width: 1100px; padding-top: 5rem; }
 h1, h2, h3 { font-weight: 700 !important; letter-spacing: -.02em; color: #F2F2F5; }
 h1 { font-size: 2.2rem !important; }
 hr { border: none !important; height: 2px; background: var(--bg); box-shadow: var(--inset); border-radius: 2px; }
@@ -1586,14 +1586,19 @@ button, summary, [role="tab"], [data-baseweb="select"] > div, [data-baseweb="inp
 [data-testid="stSidebarNavLink"], [data-testid="stTopNavLink"] { border-radius: 999px; }
 [data-testid="stSidebarNavLink"]:hover { background: rgba(217,164,0,.14); }
 [data-testid="stTopNavLink"], [data-testid="stTopNavSection"] a {
-  font-size: 1.15rem !important; font-weight: 600; padding: .75rem 1.5rem !important; min-height: 3rem;
+  font-size: 1.15rem !important; font-weight: 600; padding: .8rem 1.75rem !important; min-height: 3.1rem;
   border-radius: 999px; background: var(--bg); box-shadow: var(--raise-sm); color: #E6E8F2;
 }
 [data-testid="stTopNavLink"] span, [data-testid="stTopNavLink"] p { font-size: 1.15rem !important; }
 [data-testid="stTopNavLink"] [data-testid="stIconMaterial"] { font-size: 1.5rem !important; }
 [data-testid="stTopNavLink"]:hover { color: #D9A400; box-shadow: var(--raise); }
 [data-testid="stTopNavLink"][aria-current="page"], [data-testid="stTopNavLink"][aria-selected="true"] { box-shadow: var(--inset); color: #D9A400; }
-[data-testid="stTopNavLinkContainer"] { gap: .75rem; }
+[data-testid="stTopNavLinkContainer"] { gap: 1rem; }
+[data-testid="stTopNavLink"] {
+  transition: box-shadow .35s cubic-bezier(.4,0,.2,1), color .35s ease, background-color .35s ease, transform .35s cubic-bezier(.4,0,.2,1);
+  box-shadow: 4px 4px 12px rgba(10,11,15,.55), -4px -4px 12px rgba(58,63,77,.3);
+}
+[data-testid="stTopNavLink"]:hover { transform: translateY(-1px); }
 [data-testid="stHeader"] { min-height: 4.5rem; }
 [data-baseweb="slider"] [role="slider"] { box-shadow: var(--raise-sm); background: #D9A400 !important; }
 [data-testid="stProgress"] > div > div { background: var(--bg); box-shadow: var(--inset); border-radius: 999px; }
