@@ -710,6 +710,29 @@ def delete_project(name):
     store_projects([n for n in load_projects() if n.casefold() != name.casefold()])
 
 
+def rename_project(old, new):
+    new = minutes_store.clean_project(new)
+    names = load_projects()
+    if not new or new == old:
+        return False
+    meetings = load_meetings()
+    taken = next((n for n in names if n.casefold() == new.casefold() and n.casefold() != old.casefold()), None)
+    if taken:
+        new = taken  # merging into the existing project keeps its spelling
+    changed = minutes_store.rename_project(meetings, old, new)
+    try:
+        for meeting in changed:
+            if meeting["source"] == "cloud":
+                minutes_store.save_minutes(
+                    auth_db.client_for_user(), meeting, meeting["minutes"], user_id=st.session_state.get("user_id")
+                )
+    except Exception as error:
+        st.session_state["task_error"] = f"Could not update tasks: {error}"
+        return False
+    store_projects(minutes_store.renamed_list(names, old, new))
+    return not st.session_state.get("task_error")
+
+
 def add_project_form(key):
     with st.form(key, clear_on_submit=True, border=False):
         name_column, button_column = st.columns([3, 1], vertical_alignment="bottom")
@@ -756,12 +779,22 @@ def projects_section(meetings):
         if names:
             with st.expander("Manage projects"):
                 for name in names:
-                    label_column, delete_column = st.columns([3, 1], vertical_alignment="center")
-                    label_column.write(name)
+                    name_column, rename_column, delete_column = st.columns([3, 1, 1], vertical_alignment="bottom")
+                    new_name = name_column.text_input(
+                        "Project name", value=name, key=f"rename_input_{name}", label_visibility="collapsed"
+                    )
+                    if rename_column.button(
+                        "Rename", key=f"rename_project_{name}", disabled=not new_name.strip() or new_name.strip() == name
+                    ):
+                        if rename_project(name, new_name):
+                            st.rerun()
                     if delete_column.button("Delete", key=f"delete_project_{name}", icon=":material/delete:"):
                         delete_project(name)
                         st.rerun()
-                st.caption("Deleting a project keeps its tasks; they become unassigned.")
+                st.caption(
+                    "Renaming updates all of the project's tasks. Using the name of another project merges them. "
+                    "Deleting a project keeps its tasks; they become unassigned."
+                )
 
 
 def dashboard_page():
@@ -1239,14 +1272,15 @@ def task_card(row, today, project_names):
         project_tag = f"{row['project']} · " if row["project"] else ""
         st.caption(f"{project_tag}{row['owner']} · {due_label(row, today)} · {meeting_title(meeting)}")
         options = [NO_PROJECT, *project_names]
+        project_key = f"project_{base}_{row['project']}"
         st.selectbox(
             "Project",
             options,
             index=options.index(row["project"]) if row["project"] in options else 0,
-            key=f"project_{base}",
+            key=project_key,
             disabled=not editable,
             on_change=update_task,
-            args=(meeting["id"], row["id"], f"project_{base}", "project"),
+            args=(meeting["id"], row["id"], project_key, "project"),
         )
         with st.expander("Details"):
             owner_column, due_column = st.columns(2)

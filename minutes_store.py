@@ -165,6 +165,31 @@ def project_stats(rows, names):
     return stats
 
 
+def rename_project(meetings, old, new):
+    """Moves every task from project `old` to `new`; returns the meetings that changed."""
+    new = clean_project(new)
+    changed = []
+    for meeting in meetings:
+        touched = False
+        for item in (meeting.get("minutes") or {}).get("action_items") or []:
+            if (item.get("project") or "").casefold() == old.casefold():
+                item["project"] = new
+                touched = True
+        if touched:
+            changed.append(meeting)
+    return changed
+
+
+def renamed_list(names, old, new):
+    """Project list after renaming; merges into an existing project if the new name is taken."""
+    new = clean_project(new)
+    others = [n for n in names if n.casefold() != old.casefold()]
+    taken = next((n for n in others if n.casefold() == new.casefold()), None)
+    if taken:
+        return others
+    return [new if n.casefold() == old.casefold() else n for n in names]
+
+
 def remove_project(meetings, name):
     """Clears a project from every task that uses it; returns the meetings that changed."""
     changed = []
