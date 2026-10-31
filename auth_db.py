@@ -82,6 +82,17 @@ def sign_out():
         st.session_state.pop(key, None)
 
 
+def get_projects(client):
+    """The user's project names, kept in their account metadata (no table needed)."""
+    user = client.auth.get_user().user
+    names = ((user.user_metadata or {}) if user else {}).get("projects") or []
+    return [str(n) for n in names if str(n).strip()]
+
+
+def save_projects(client, names):
+    client.auth.update_user({"data": {"projects": list(names)}})
+
+
 def upsert_meeting(client, row):
     return (
         client.table(MEETINGS_TABLE)

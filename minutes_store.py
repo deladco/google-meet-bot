@@ -125,8 +125,58 @@ def set_task(minutes, task_id, **fields):
                 item.pop("due", None)
         if "owner" in fields:
             item["owner"] = (fields["owner"] or "").strip() or "Not specified"
+        if "project" in fields:
+            project = clean_project(fields["project"])
+            if project:
+                item["project"] = project
+            else:
+                item.pop("project", None)
         return True
     return False
+
+
+def clean_project(name):
+    return " ".join(str(name or "").split())[:60]
+
+
+def add_project(names, name):
+    """Returns the list with name added (case-insensitive duplicates ignored)."""
+    name = clean_project(name)
+    if not name or name.casefold() in {n.casefold() for n in names}:
+        return list(names)
+    return [*names, name]
+
+
+def all_projects(stored, rows):
+    """Stored projects plus any named on tasks, in a stable order."""
+    result = list(stored)
+    for row in rows:
+        if row.get("project"):
+            result = add_project(result, row["project"])
+    return result
+
+
+def project_stats(rows, names):
+    stats = {name: {"open": 0, "done": 0} for name in names}
+    stats[""] = {"open": 0, "done": 0}
+    for row in rows:
+        key = row.get("project") if row.get("project") in stats else ""
+        stats[key]["done" if row["done"] else "open"] += 1
+    return stats
+
+
+def remove_project(meetings, name):
+    """Clears a project from every task that uses it; returns the meetings that changed."""
+    changed = []
+    for meeting in meetings:
+        touched = False
+        for item in (meeting.get("minutes") or {}).get("action_items") or []:
+            if (item.get("project") or "").casefold() == name.casefold():
+                item.pop("project", None)
+                touched = True
+        if touched:
+            changed.append(meeting)
+    return changed
 
 
 def task_rows(meetings):
@@ -145,6 +195,7 @@ def task_rows(meetings):
                     "deadline": item.get("deadline") or "Not specified",
                     "due": parse_due(item.get("due")),
                     "done": item.get("status") == "done",
+                    "project": clean_project(item.get("project")),
                     "refs": item.get("transcript_refs") or [],
                     "meeting": meeting,
                 }

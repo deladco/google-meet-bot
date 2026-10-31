@@ -673,6 +673,97 @@ def first_meeting_help_inline():
     )
 
 
+NO_PROJECT = "No project"
+UNASSIGNED = "Unassigned"
+
+
+def load_projects():
+    if "projects" not in st.session_state:
+        try:
+            st.session_state["projects"] = auth_db.get_projects(auth_db.client_for_user())
+        except Exception:
+            st.session_state["projects"] = []
+    return st.session_state["projects"]
+
+
+def store_projects(names):
+    try:
+        auth_db.save_projects(auth_db.client_for_user(), names)
+        st.session_state["projects"] = names
+        st.session_state.pop("task_error", None)
+    except Exception as error:
+        st.session_state["task_error"] = f"Could not save projects: {error}"
+
+
+def delete_project(name):
+    meetings = load_meetings()
+    changed = minutes_store.remove_project(meetings, name)
+    try:
+        for meeting in changed:
+            if meeting["source"] == "cloud":
+                minutes_store.save_minutes(
+                    auth_db.client_for_user(), meeting, meeting["minutes"], user_id=st.session_state.get("user_id")
+                )
+    except Exception as error:
+        st.session_state["task_error"] = f"Could not update tasks: {error}"
+        return
+    store_projects([n for n in load_projects() if n.casefold() != name.casefold()])
+
+
+def add_project_form(key):
+    with st.form(key, clear_on_submit=True, border=False):
+        name_column, button_column = st.columns([3, 1], vertical_alignment="bottom")
+        name = name_column.text_input("New project", placeholder="New project name", label_visibility="collapsed")
+        submitted = button_column.form_submit_button("Add project", icon=":material/add:", width="stretch")
+    if submitted:
+        current = load_projects()
+        updated = minutes_store.add_project(current, name)
+        if updated == current:
+            st.warning("Enter a project name that doesn't exist yet.")
+        else:
+            store_projects(updated)
+            st.rerun()
+
+
+def open_task_board(project):
+    st.session_state["pending_project_filter"] = [project]
+    st.switch_page(PAGE_ACTIONS)
+
+
+def projects_section(meetings):
+    rows = minutes_store.task_rows(meetings)
+    names = minutes_store.all_projects(load_projects(), rows)
+    stats = minutes_store.project_stats(rows, names)
+    with st.container(border=True, key="projects"):
+        st.subheader("Projects", anchor=False)
+        st.caption("Group your tasks by project. Move a task into a project from the Task board.")
+        if st.session_state.get("task_error"):
+            st.error(st.session_state["task_error"])
+        entries = [(name, stats[name]) for name in names]
+        if stats[""]["open"] + stats[""]["done"]:
+            entries.append((UNASSIGNED, stats[""]))
+        if not entries:
+            st.info("No projects yet. Add one below, then assign tasks to it.")
+        for start in range(0, len(entries), 3):
+            columns = st.columns(3)
+            for column, (name, counts) in zip(columns, entries[start : start + 3]):
+                with column.container(border=True):
+                    st.markdown(f"**{name}**")
+                    st.caption(f"{counts['open']} open · {counts['done']} done")
+                    if st.button("Open tasks", key=f"open_project_{name}", type="tertiary", icon=":material/arrow_forward:"):
+                        open_task_board(name)
+        add_project_form("add_project_dashboard")
+        if names:
+            with st.expander("Manage projects"):
+                for name in names:
+                    label_column, delete_column = st.columns([3, 1], vertical_alignment="center")
+                    label_column.write(name)
+                    if delete_column.button("Delete", key=f"delete_project_{name}", icon=":material/delete:"):
+                        delete_project(name)
+                        st.rerun()
+                st.caption("Deleting a project keeps its tasks; they become unassigned.")
+
+
 def dashboard_page():
     meetings = load_meetings()
     actions = [a for m in meetings for a in minutes_list(m, "action_items")]
@@ -688,6 +779,8 @@ def dashboard_page():
     metric_columns[0].metric("Meetings", len(meetings), border=True)
     metric_columns[1].metric("Action items", len(actions), border=True)
     metric_columns[2].metric("Hours transcribed", f"{hours:.1f}", border=True)
+
+    projects_section(meetings)
 
     recent_column, ask_column = st.columns([3, 2], gap="large")
     with recent_column:
@@ -1105,6 +1198,8 @@ def update_task(meeting_id, task_id, widget_key, field):
     value = st.session_state.get(widget_key)
     if field == "status":
         value = "done" if value else "open"
+    elif field == "project" and value == NO_PROJECT:
+        value = ""
     if not minutes_store.set_task(meeting["minutes"], task_id, **{field: value}):
         return
     try:
@@ -1128,7 +1223,7 @@ def due_label(row, today):
     return f"Due {text}"
 
 
-def task_card(row, today):
+def task_card(row, today, project_names):
     meeting = row["meeting"]
     editable = meeting["source"] == "cloud"
     base = f"{meeting['id']}_{row['id']}"
@@ -1141,7 +1236,18 @@ def task_card(row, today):
             on_change=update_task,
             args=(meeting["id"], row["id"], f"done_{base}", "status"),
         )
-        st.caption(f"{row['owner']} · {due_label(row, today)} · {meeting_title(meeting)}")
+        project_tag = f"{row['project']} · " if row["project"] else ""
+        st.caption(f"{project_tag}{row['owner']} · {due_label(row, today)} · {meeting_title(meeting)}")
+        options = [NO_PROJECT, *project_names]
+        st.selectbox(
+            "Project",
+            options,
+            index=options.index(row["project"]) if row["project"] in options else 0,
+            key=f"project_{base}",
+            disabled=not editable,
+            on_change=update_task,
+            args=(meeting["id"], row["id"], f"project_{base}", "project"),
+        )
         with st.expander("Details"):
             owner_column, due_column = st.columns(2)
             owner_column.text_input(
@@ -1195,6 +1301,15 @@ def actions_page():
     metric_columns[3].metric("Done", sum(r["done"] for r in rows), border=True)
 
     view = st.segmented_control("Show", TASK_VIEWS, default="Open", label_visibility="collapsed") or "Open"
+    project_names = minutes_store.all_projects(load_projects(), rows)
+    project_options = [*project_names, UNASSIGNED]
+    if "pending_project_filter" in st.session_state:
+        st.session_state["task_projects"] = st.session_state.pop("pending_project_filter")
+    if "task_projects" in st.session_state:
+        st.session_state["task_projects"] = [p for p in st.session_state["task_projects"] if p in project_options]
+    chosen_projects = st.multiselect(
+        "Project", project_options, key="task_projects", placeholder="All projects", label_visibility="collapsed"
+    )
     needle = st.text_input(
         "Search tasks", label_visibility="collapsed", placeholder="Search tasks or meetings", icon=":material/search:"
     ).strip().casefold()
@@ -1204,7 +1319,9 @@ def actions_page():
         chosen_owners = st.multiselect("Owner", owners, placeholder="All owners")
         meeting_titles = sorted({meeting_title(r["meeting"]) for r in rows})
         chosen_meetings = st.multiselect("Meeting", meeting_titles, placeholder="All meetings")
-        sort_by = st.selectbox("Sort by", ["Due date", "Newest meeting", "Owner"])
+        sort_by = st.selectbox("Sort by", ["Due date", "Newest meeting", "Owner", "Project"])
+    with st.expander("New project", icon=":material/create_new_folder:"):
+        add_project_form("add_project_board")
 
     allowed = DUE_FILTERS[due_filter]
     shown = [
@@ -1212,6 +1329,7 @@ def actions_page():
         for r in rows
         if (view == "All" or (view == "Done") == r["done"])
         and (allowed is None or minutes_store.due_bucket({**r, "done": False}, today) in allowed)
+        and (not chosen_projects or (r["project"] or UNASSIGNED) in chosen_projects)
         and (not chosen_owners or r["owner"] in chosen_owners)
         and (not chosen_meetings or meeting_title(r["meeting"]) in chosen_meetings)
         and (not needle or needle in r["task"].casefold() or needle in meeting_title(r["meeting"]).casefold())
@@ -1225,6 +1343,8 @@ def actions_page():
         shown = sorted(newest_first, key=lambda r: (r["due"] is None, r["due"] or datetime.max.date()))
     elif sort_by == "Owner":
         shown = sorted(newest_first, key=lambda r: r["owner"].casefold())
+    elif sort_by == "Project":
+        shown = sorted(newest_first, key=lambda r: (not r["project"], r["project"].casefold()))
     else:
         shown = newest_first
 
@@ -1232,11 +1352,12 @@ def actions_page():
         st.info("Nothing here. Change the filters, or switch the view to All.")
     st.caption(f"{len(shown)} of {len(rows)} tasks")
     for row in shown:
-        task_card(row, today)
+        task_card(row, today, project_names)
 
     export = [
         {
             "Task": r["task"],
+            "Project": r["project"],
             "Status": "Done" if r["done"] else "Open",
             "Owner": r["owner"],
             "Due": r["due"].isoformat() if r["due"] else "",
