@@ -31,12 +31,12 @@ from transcript_quality import LEARNED_FILE, vocabulary
 PROJECT_DIR = Path(__file__).resolve().parent
 VOCABULARY_FILE = PROJECT_DIR / "vocabulary.txt"
 LANGUAGES = {"Auto-detect": None, "English": "en", "Ukrainian": "uk", "Russian": "ru"}
-LOGO_FILE = PROJECT_DIR / "assets" / "logo.svg"
+LOGO_FILE = PROJECT_DIR / "assets" / "logo_neu.svg"
 MEETINGS_CACHE_SECONDS = 45
 
 load_dotenv(dotenv_path=PROJECT_DIR / ".env")
 st.set_page_config(
-    page_title="Meet AI!",
+    page_title="Daryna's AI Meetings Assistant",
     page_icon=str(Path(__file__).resolve().parent / "assets" / "favicon.png"),
     layout="wide",
 )
@@ -96,7 +96,7 @@ LANDING_STEPS = [
 def landing_intro():
     logo_column, name_column = st.columns([1, 5], vertical_alignment="center")
     logo_column.image(str(LOGO_FILE), width=110)
-    name_column.markdown("# Meet AI!")
+    name_column.markdown("# Daryna's AI Meetings Assistant")
     st.markdown("### Turn every meeting into clear notes, decisions and tasks.")
     st.write(
         "An AI assistant that joins your calls, writes down what was said in "
@@ -802,7 +802,7 @@ def dashboard_page():
     actions = [a for m in meetings for a in minutes_list(m, "action_items")]
     hours = sum(meeting_duration_hours(m) for m in meetings)
 
-    st.title("Meet AI!")
+    st.title("Daryna's AI Meetings Assistant")
     with st.container(border=True, key="new_meeting"):
         st.subheader("Start a new meeting", anchor=False)
         st.caption("Paste a meeting link and the AI joins, records and writes your notes. Or record or upload audio.")
@@ -1517,14 +1517,14 @@ PAGE_SETTINGS = st.Page(settings_page, title="Settings", icon=":material/setting
 HOVER_CSS = """
 <style>
 :root {
-  --bg: #EDEDEE; --raise: 6px 6px 14px rgba(163,165,172,.55), -6px -6px 14px rgba(255,255,255,.95);
-  --raise-sm: 3px 3px 8px rgba(163,165,172,.5), -3px -3px 8px rgba(255,255,255,.9);
-  --inset: inset 3px 3px 7px rgba(163,165,172,.55), inset -3px -3px 7px rgba(255,255,255,.95);
-  --accent: #3B82F6;
+  --bg: #23262E; --raise: 6px 6px 14px rgba(10,11,15,.75), -6px -6px 14px rgba(58,63,77,.45);
+  --raise-sm: 3px 3px 8px rgba(10,11,15,.7), -3px -3px 8px rgba(58,63,77,.4);
+  --inset: inset 3px 3px 7px rgba(10,11,15,.75), inset -3px -3px 7px rgba(58,63,77,.4);
+  --accent: #FFD633;
 }
 .stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"] { background: var(--bg) !important; }
 .block-container { max-width: 1100px; padding-top: 2.5rem; }
-h1, h2, h3 { font-weight: 700 !important; letter-spacing: -.02em; color: #111; }
+h1, h2, h3 { font-weight: 700 !important; letter-spacing: -.02em; color: #F2F2F5; }
 h1 { font-size: 2.2rem !important; }
 hr { border: none !important; height: 2px; background: var(--bg); box-shadow: var(--inset); border-radius: 2px; }
 
@@ -1538,27 +1538,27 @@ button, summary, [role="tab"], [data-baseweb="select"] > div, [data-baseweb="inp
   box-shadow: var(--raise); padding: 1rem 1.1rem;
 }
 [data-testid="stExpander"] details { border: none !important; }
-[data-testid="stExpander"] summary:hover { background: rgba(255,255,255,.5); border-radius: 14px; }
+[data-testid="stExpander"] summary:hover { background: rgba(255,255,255,.06); border-radius: 14px; }
 [data-testid="stImage"] img { border-radius: 14px; }
 
 /* pill buttons */
 .stButton > button, .stDownloadButton > button, .stFormSubmitButton > button,
 [data-testid="stBaseButton-pills"], [data-testid="stBaseButton-segmented_control"] {
-  background: var(--bg); color: #222; border: none; border-radius: 999px;
+  background: var(--bg); color: #E6E8F2; border: none; border-radius: 999px;
   box-shadow: var(--raise-sm); padding: .45rem 1.4rem;
 }
 .stButton > button:hover, .stDownloadButton > button:hover, .stFormSubmitButton > button:hover {
-  background: #E4E4E6; color: #000; box-shadow: var(--raise);
+  background: #2A2E38; color: #FFD633; box-shadow: var(--raise);
 }
 .stButton > button:active, .stDownloadButton > button:active, .stFormSubmitButton > button:active {
   box-shadow: var(--inset);
 }
 .stButton > button:focus-visible, .stFormSubmitButton > button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .stButton > button[kind="primary"], .stFormSubmitButton > button[kind="primary"] {
-  background: linear-gradient(145deg, #9A9BA2, #7E7F86); color: #fff;
+  background: linear-gradient(145deg, #FFE066, #F5B800); color: #1A1500; font-weight: 600;
 }
 .stButton > button[kind="primary"]:hover, .stFormSubmitButton > button[kind="primary"]:hover {
-  background: linear-gradient(145deg, #8E8F96, #72737A); color: #fff;
+  background: linear-gradient(145deg, #FFEB8A, #FFC81A); color: #1A1500;
 }
 .stButton > button[kind="tertiary"] { box-shadow: none; background: transparent; }
 .stButton > button[kind="tertiary"]:hover { box-shadow: var(--raise-sm); }
@@ -1578,14 +1578,14 @@ button, summary, [role="tab"], [data-baseweb="select"] > div, [data-baseweb="inp
 /* tabs as soft segmented pills */
 [data-baseweb="tab-list"] { gap: .5rem; background: transparent; }
 [role="tab"] { border-radius: 999px; padding: .4rem 1.1rem; box-shadow: var(--raise-sm); background: var(--bg); }
-[role="tab"][aria-selected="true"] { box-shadow: var(--inset); color: #111; }
-[role="tab"]:hover { color: #000; }
+[role="tab"][aria-selected="true"] { box-shadow: var(--inset); color: #FFD633; }
+[role="tab"]:hover { color: #FFD633; }
 [data-baseweb="tab-highlight"], [data-baseweb="tab-border"] { display: none; }
 
 /* top navigation links */
 [data-testid="stSidebarNavLink"], [data-testid="stTopNavLink"] { border-radius: 999px; }
-[data-testid="stSidebarNavLink"]:hover { background: rgba(255,255,255,.6); }
-[data-baseweb="slider"] [role="slider"] { box-shadow: var(--raise-sm); background: #F7F7F8 !important; }
+[data-testid="stSidebarNavLink"]:hover { background: rgba(255,214,51,.12); }
+[data-baseweb="slider"] [role="slider"] { box-shadow: var(--raise-sm); background: #FFD633 !important; }
 [data-testid="stProgress"] > div > div { background: var(--bg); box-shadow: var(--inset); border-radius: 999px; }
 
 .st-key-new_meeting { padding: 1.5rem 1.75rem; }

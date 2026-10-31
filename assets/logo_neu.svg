@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Daryna's AI Meetings Assistant logo">
+  <defs>
+    <linearGradient id="face" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2B2F3A"/>
+      <stop offset="1" stop-color="#1D2028"/>
+    </linearGradient>
+    <linearGradient id="well" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#171A20"/>
+      <stop offset="1" stop-color="#2A2E39"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFE066"/>
+      <stop offset="1" stop-color="#F5B800"/>
+    </linearGradient>
+    <filter id="raise" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="14" dy="14" stdDeviation="14" flood-color="#0A0B0F" flood-opacity="0.85"/>
+      <feDropShadow dx="-10" dy="-10" stdDeviation="12" flood-color="#3A3F4D" flood-opacity="0.55"/>
+    </filter>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="8" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect x="56" y="56" width="400" height="400" rx="112" fill="url(#face)" filter="url(#raise)"/>
+  <circle cx="256" cy="256" r="132" fill="url(#well)" stroke="#12141A" stroke-width="3"/>
+  <path d="M256 168 C262 220 292 250 344 256 C292 262 262 292 256 344 C250 292 220 262 168 256 C220 250 250 220 256 168 Z" fill="url(#gold)" filter="url(#glow)"/>
+</svg>
