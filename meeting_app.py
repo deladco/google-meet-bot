@@ -1585,6 +1585,16 @@ button, summary, [role="tab"], [data-baseweb="select"] > div, [data-baseweb="inp
 /* top navigation links */
 [data-testid="stSidebarNavLink"], [data-testid="stTopNavLink"] { border-radius: 999px; }
 [data-testid="stSidebarNavLink"]:hover { background: rgba(217,164,0,.14); }
+[data-testid="stTopNavLink"], [data-testid="stTopNavSection"] a {
+  font-size: 1.15rem !important; font-weight: 600; padding: .75rem 1.5rem !important; min-height: 3rem;
+  border-radius: 999px; background: var(--bg); box-shadow: var(--raise-sm); color: #E6E8F2;
+}
+[data-testid="stTopNavLink"] span, [data-testid="stTopNavLink"] p { font-size: 1.15rem !important; }
+[data-testid="stTopNavLink"] [data-testid="stIconMaterial"] { font-size: 1.5rem !important; }
+[data-testid="stTopNavLink"]:hover { color: #D9A400; box-shadow: var(--raise); }
+[data-testid="stTopNavLink"][aria-current="page"], [data-testid="stTopNavLink"][aria-selected="true"] { box-shadow: var(--inset); color: #D9A400; }
+[data-testid="stTopNavLinkContainer"] { gap: .75rem; }
+[data-testid="stHeader"] { min-height: 4.5rem; }
 [data-baseweb="slider"] [role="slider"] { box-shadow: var(--raise-sm); background: #D9A400 !important; }
 [data-testid="stProgress"] > div > div { background: var(--bg); box-shadow: var(--inset); border-radius: 999px; }
 
