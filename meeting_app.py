@@ -38,7 +38,6 @@ SUPPORTED_LANGUAGES = {
     "Finnish": "fi", "Greek": "el", "Hungarian": "hu", "Lithuanian": "lt", "Latvian": "lv", "Estonian": "et",
 }
 LANGUAGES = {"Auto-detect": None, **SUPPORTED_LANGUAGES}
-LANGUAGE_LIST = ", ".join(SUPPORTED_LANGUAGES)
 LOGO_FILE = PROJECT_DIR / "assets" / "logo.png"
 MEETINGS_CACHE_SECONDS = 45
 
@@ -88,7 +87,7 @@ def require_password():
 
 LANDING_FEATURES = [
     (":material/smart_toy:", "Joins for you", "Send the bot to a Google Meet, Zoom or Teams call, or record and upload audio yourself."),
-    (":material/translate:", "30+ languages, auto-detected", f"The spoken language is detected automatically, even when people switch mid-meeting: {LANGUAGE_LIST}."),
+    (":material/translate:", "30+ languages, auto-detected", "Speech is transcribed in the language spoken, including English, Ukrainian, Russian and many more, even when people switch mid-meeting."),
     (":material/groups:", "Knows who spoke", "Every line is attributed to a speaker, so the notes read like a real conversation."),
     (":material/task_alt:", "Summary and action items", "Get decisions, tasks with owners and deadlines, and open questions in minutes."),
     (":material/chat:", "Ask AI", "Ask \"What did we decide about the launch?\" and get answers with sources from your own meetings."),
