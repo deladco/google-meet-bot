@@ -1653,6 +1653,24 @@ hr { background: linear-gradient(90deg, transparent, rgba(255,227,71,.35), trans
 ::-webkit-scrollbar-thumb { background: #3A3F4D; border-radius: 999px; border: 2px solid var(--bg); }
 ::-webkit-scrollbar-thumb:hover { background: #D9A400; }
 ::selection { background: rgba(255,227,71,.35); }
+/* pastel-style gradient tiles (dark-adapted from the reference) */
+:root {
+  --tile-blue: linear-gradient(145deg, #2C3750 0%, #26304A 100%);
+  --tile-yellow: linear-gradient(145deg, #4A4220 0%, #2E2F3A 100%);
+  --tile-mix: linear-gradient(135deg, #4A4220 0%, #2A3350 100%);
+  --tile-ink: linear-gradient(145deg, #2B2F3A 0%, #23262E 100%);
+}
+[data-testid="stMetric"] { background: var(--tile-blue) !important; }
+[data-testid="stColumn"]:nth-child(even) [data-testid="stMetric"] { background: var(--tile-yellow) !important; }
+[data-testid="stColumn"]:nth-child(3n) [data-testid="stMetric"] { background: var(--tile-mix) !important; }
+[data-testid="stVerticalBlockBorderWrapper"] { background: var(--tile-mix) !important; }
+[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stVerticalBlockBorderWrapper"] { background: var(--tile-ink) !important; }
+[data-testid="stExpander"] { background: var(--tile-blue) !important; }
+[data-testid="stForm"] { background: var(--tile-yellow) !important; }
+[data-testid="stAlert"] { background: var(--tile-mix) !important; }
+.st-key-new_meeting { background: linear-gradient(135deg, #5A4F1F 0%, #2E3A5C 100%) !important; }
+[data-testid="stMetricLabel"] { color: #AEB8D6; }
+[data-testid="stMetricValue"] { color: #FFE347; }
 @media (max-width: 640px) {
   .block-container { padding: 3.5rem 1rem 5rem; }
   .stDownloadButton > button, .stFormSubmitButton > button { width: 100%; }
