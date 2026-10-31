@@ -307,6 +307,9 @@ def minutes_list(meeting, key):
 
 
 def meeting_title(meeting):
+    custom = (meeting["minutes"] or {}).get("title")
+    if isinstance(custom, str) and custom.strip():
+        return custom.strip()
     topics = minutes_list(meeting, "discussion_topics")
     if topics and topics[0].get("topic"):
         return str(topics[0]["topic"])
@@ -846,6 +849,16 @@ DATE_FILTERS = {"Any time": None, "Last 7 days": 7, "Last 30 days": 30, "Last 90
 SORT_OPTIONS = ["Newest first", "Oldest first", "Most action items", "Title A-Z"]
 
 
+def rename_meeting(meeting, new_title):
+    minutes = dict(meeting["minutes"])
+    new_title = " ".join(new_title.split())
+    if new_title:
+        minutes["title"] = new_title
+    else:
+        minutes.pop("title", None)  # empty name restores the automatic title
+    return persist_minutes(meeting, minutes, "Meeting renamed")
+
+
 def meeting_card(meeting, key_prefix, show_open=True):
     """Compact, mobile-friendly summary of one meeting."""
     with st.container(border=True):
@@ -858,8 +871,17 @@ def meeting_card(meeting, key_prefix, show_open=True):
         else:
             detail = status_label(meeting)
         st.caption(f"{when_label(meeting['recorded_at'])} · {detail}")
-        if show_open and st.button("Open", key=f"{key_prefix}_{meeting['id']}", type="tertiary", icon=":material/arrow_forward:"):
+        can_rename = meeting["source"] == "cloud" and bool(meeting["minutes"])
+        open_column, rename_column = st.columns([1, 1], vertical_alignment="center")
+        if show_open and open_column.button("Open", key=f"{key_prefix}_{meeting['id']}", type="tertiary", icon=":material/arrow_forward:"):
             open_meeting(meeting["id"])
+        if can_rename:
+            with rename_column.popover("Rename", icon=":material/edit:"):
+                with st.form(f"rename_form_{key_prefix}_{meeting['id']}", border=False):
+                    new_title = st.text_input("Meeting name", value=meeting_title(meeting), max_chars=120)
+                    if st.form_submit_button("Save name", type="primary", icon=":material/check:"):
+                        if rename_meeting(meeting, new_title):
+                            st.rerun()
 
 
 def first_meeting_help():
