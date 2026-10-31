@@ -485,6 +485,14 @@ def render_bot_status():
             )
         if job.get("message"):
             st.caption(job["message"])
+        live_text = (job.get("live_transcript") or "").strip()
+        if code in ("recording", "stop_requested") and live_text:
+            st.markdown("**:material/graphic_eq: Live captions**")
+            with st.container(height=260, border=True):
+                st.text(live_text)
+            st.caption("Captions appear a few seconds behind the speaker. The final transcript is more accurate and names speakers.")
+        elif code == "recording":
+            st.caption("Live captions will appear here once people start speaking.")
         if code in meeting_bot.FINISHED:
             return False
         if code in meeting_bot.STOPPABLE and st.button(

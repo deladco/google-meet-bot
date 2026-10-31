@@ -30,8 +30,10 @@ load_dotenv(dotenv_path=PROJECT_DIR / ".env")
 import auth_db
 import meeting_bot
 from meeting_history import MeetingHistory
+from live_captions import LiveCaptions
 from remote_workflow import process_uploaded_recording
 
+LIVE_CAPTIONS = os.environ.get("BOT_LIVE_CAPTIONS", "1") == "1"
 SAMPLE_RATE = 16000
 POLL_SECONDS = 10
 AUDIO_TABLE = "audio_jobs"
@@ -74,6 +76,11 @@ def set_audio_job(db, job_id, **fields):
 def job_status(db, job_id):
     row = get_row(db, job_id)
     return row["status"] if row else "cancelled"
+
+
+def publish_live(db, job_id, text):
+    """Pushes the latest captions to the job row; needs the live_transcript column (see the migration)."""
+    db.table(meeting_bot.JOBS_TABLE).update({"live_transcript": text}).eq("id", job_id).execute()
 
 
 def get_row(db, job_id):
@@ -284,6 +291,7 @@ def record_meeting(db, job, wav_path):
     from playwright.sync_api import sync_playwright
 
     recorder = Recorder(wav_path)
+    captions = None
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(
             headless=HEADLESS,
@@ -335,6 +343,9 @@ def record_meeting(db, job, wav_path):
                 pass
 
             recorder.start()
+            if LIVE_CAPTIONS:
+                captions = LiveCaptions(wav_path, lambda text: publish_live(db, job["id"], text))
+                captions.start()
             print("Admitted - recording started", flush=True)
             set_job(db, job["id"], status="recording", message=None)
             deadline = time.time() + MAX_MINUTES * 60
@@ -349,6 +360,8 @@ def record_meeting(db, job, wav_path):
                 time.sleep(3)
             return True
         finally:
+            if captions:
+                captions.stop()
             recorder.stop()
             try:
                 _click_first(page, ["Leave call", "Leave", "Hang up"], 1000)
