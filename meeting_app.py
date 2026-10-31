@@ -94,8 +94,8 @@ LANDING_STEPS = [
 
 
 def landing_intro():
-    logo_column, name_column =     st.columns([2, 5], vertical_alignment="center")
-        logo_column.image(str(LOGO_FILE), width=260)
+    logo_column, name_column = st.columns([2, 5], vertical_alignment="center")
+    logo_column.image(str(LOGO_FILE), width=260)
     name_column.markdown("# Meet AI!")
     st.markdown("### Turn every meeting into clear notes, decisions and tasks.")
     st.write(
