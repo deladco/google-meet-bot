@@ -57,7 +57,7 @@ def learn_vocabulary(entries, meeting_id):
     full_text = "\n".join(texts).casefold()
     known = {t.casefold() for t in vocabulary()}
     system = (
-        "From a meeting transcript (English, Ukrainian, Russian, often mixed) list proper names of people, "
+        "From a meeting transcript (any language, often mixed, e.g. English, Ukrainian, Russian) list proper names of people, "
         "companies, products, tools, and technical terms or acronyms that a speech recognizer could misspell. "
         "Skip ordinary words and phrases. Each term is one or two words, copied exactly as written in the transcript. "
         "Return JSON: {\"terms\":[\"...\"]}."
@@ -135,7 +135,7 @@ def _similar(a, b):
 def _correct_batch(client, model, batch, terms, context):
     lines = "\n".join(f"{i}|{e['text']}" for i, e in batch)
     system = (
-        "You fix speech-recognition errors in a meeting transcript (English, Ukrainian, Russian, often mixed). "
+        "You fix speech-recognition errors in a meeting transcript (any language, often mixed, e.g. English, Ukrainian, Russian). "
         "Correct only clear mistakes: misspelled names and technical terms, wrong word forms, missing punctuation. "
         "Keep each line in its original language and wording; never translate, summarize, add or remove content. "
         "If a line is fine or you are unsure, omit it. Return JSON: {\"fixes\":[{\"i\":<line number>,\"text\":\"<corrected text>\"}]}."

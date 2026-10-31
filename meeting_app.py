@@ -30,7 +30,15 @@ from transcript_quality import LEARNED_FILE, vocabulary
 
 PROJECT_DIR = Path(__file__).resolve().parent
 VOCABULARY_FILE = PROJECT_DIR / "vocabulary.txt"
-LANGUAGES = {"Auto-detect": None, "English": "en", "Ukrainian": "uk", "Russian": "ru"}
+SUPPORTED_LANGUAGES = {
+    "English": "en", "Ukrainian": "uk", "Russian": "ru", "Polish": "pl", "German": "de", "French": "fr",
+    "Spanish": "es", "Italian": "it", "Portuguese": "pt", "Dutch": "nl", "Czech": "cs", "Slovak": "sk",
+    "Romanian": "ro", "Bulgarian": "bg", "Turkish": "tr", "Arabic": "ar", "Hebrew": "he", "Hindi": "hi",
+    "Chinese": "zh", "Japanese": "ja", "Korean": "ko", "Swedish": "sv", "Norwegian": "no", "Danish": "da",
+    "Finnish": "fi", "Greek": "el", "Hungarian": "hu", "Lithuanian": "lt", "Latvian": "lv", "Estonian": "et",
+}
+LANGUAGES = {"Auto-detect": None, **SUPPORTED_LANGUAGES}
+LANGUAGE_LIST = ", ".join(SUPPORTED_LANGUAGES)
 LOGO_FILE = PROJECT_DIR / "assets" / "logo.png"
 MEETINGS_CACHE_SECONDS = 45
 
@@ -80,7 +88,7 @@ def require_password():
 
 LANDING_FEATURES = [
     (":material/smart_toy:", "Joins for you", "Send the bot to a Google Meet, Zoom or Teams call, or record and upload audio yourself."),
-    (":material/translate:", "English, Ukrainian, Russian", "Speech is transcribed in the language spoken, even when people switch mid-meeting."),
+    (":material/translate:", "30+ languages, auto-detected", f"The spoken language is detected automatically, even when people switch mid-meeting: {LANGUAGE_LIST}."),
     (":material/groups:", "Knows who spoke", "Every line is attributed to a speaker, so the notes read like a real conversation."),
     (":material/task_alt:", "Summary and action items", "Get decisions, tasks with owners and deadlines, and open questions in minutes."),
     (":material/chat:", "Ask AI", "Ask \"What did we decide about the launch?\" and get answers with sources from your own meetings."),
@@ -96,11 +104,11 @@ LANDING_STEPS = [
 def landing_intro():
     logo_column, name_column = st.columns([1, 5], vertical_alignment="center")
     logo_column.image(str(LOGO_FILE), width=110)
-    name_column.markdown("# Meet AI!")
+    name_column.markdown("# Chief Communication Officer")
     st.markdown("### Turn every meeting into clear notes, decisions and tasks.")
     st.write(
-        "An AI assistant that joins your calls, writes down what was said in "
-        "English, Ukrainian or Russian, and answers questions about it later."
+        "An AI assistant that joins your calls, writes down what was said in the language "
+        "people speak (detected automatically across 30+ languages), and answers questions about it later."
     )
 
 
@@ -1501,7 +1509,7 @@ def settings_page():
             "Language for uploads and in-browser recordings",
             list(LANGUAGES),
             index=list(LANGUAGES).index(st.session_state.get("transcription_language", "Auto-detect")),
-            help="Auto-detect picks the language for each segment, so mixed English, Ukrainian and Russian works. "
+            help="Auto-detect picks the language for each segment, so meetings that mix several languages work. "
             "Pick one language only if the meeting is entirely in it. The AI bot uses WHISPER_LANGUAGE on its host.",
         )
         st.caption(

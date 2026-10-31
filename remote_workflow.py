@@ -165,7 +165,7 @@ def _transcribe_once(whisper, samples, meeting_time, vad_filter, language=None):
         beam_size=5,
         hotwords=", ".join(terms) or None,
         language=language,
-        # Without a fixed language, detect it per segment so mixed English/Ukrainian/Russian speech works.
+        # Without a fixed language, detect it per segment so mixed-language speech works.
         multilingual=language is None,
         vad_filter=vad_filter,
         vad_parameters={"min_silence_duration_ms": 500, "speech_pad_ms": 300},
