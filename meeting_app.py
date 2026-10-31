@@ -1624,7 +1624,7 @@ button, summary, [role="tab"], [data-baseweb="select"] > div, [data-baseweb="inp
 }
 [data-testid="stMetric"] { border-bottom: 2px solid rgba(255,122,26,.35) !important; }
 [data-testid="stMetricValue"] { color: var(--neon); text-shadow: 0 0 14px rgba(255,122,26,.45); }
-.st-key-new_meeting { box-shadow: var(--raise), var(--neon-glow) !important; }
+.st-key-new_meeting { box-shadow: var(--raise), 0 5px 0 #14161C !important; border-bottom: none !important; }
 /* neon focus / glowing pill outlines */
 [data-baseweb="input"]:focus-within, [data-baseweb="textarea"]:focus-within, [data-baseweb="select"] > div:focus-within,
 [data-testid="stChatInput"] > div:focus-within { outline: none !important; box-shadow: var(--inset), var(--neon-glow) !important; }
@@ -1668,7 +1668,7 @@ hr { background: rgba(255,122,26,.3) !important; box-shadow: none !important; }
 [data-testid="stExpander"] { background: var(--tile-blue) !important; }
 [data-testid="stForm"] { background: var(--tile-yellow) !important; }
 [data-testid="stAlert"] { background: var(--tile-mix) !important; }
-.st-key-new_meeting { background: #3A3A44 !important; }
+.st-key-new_meeting { background: #26405C !important; }
 [data-testid="stMetricLabel"] { color: #AEB8D6; }
 [data-testid="stMetricValue"] { color: #FF7A1A; }
 /* unified button system: every button kind shares the same pill look */
