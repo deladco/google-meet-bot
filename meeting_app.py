@@ -1557,16 +1557,16 @@ button, summary, [role="tab"], [data-baseweb="select"] > div, [data-baseweb="inp
 }
 .stButton > button:focus-visible, .stFormSubmitButton > button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .stButton > button[kind="primary"], .stFormSubmitButton > button[kind="primary"] {
-  background: linear-gradient(145deg, #E0AB10, #A87800); color: #14100A; font-weight: 600;
+  background: #E0AB10; color: #14100A; font-weight: 600;
 }
 .stButton > button[kind="primary"]:hover, .stFormSubmitButton > button[kind="primary"]:hover {
-  background: linear-gradient(145deg, #E8B923, #C48D00); color: #14100A;
+  background: #E8B923; color: #14100A;
 }
 .stButton > button[kind="tertiary"] { box-shadow: none; background: transparent; }
 .stButton > button[kind="tertiary"]:hover { box-shadow: var(--raise-sm); }
 .stButton > button:disabled, .stFormSubmitButton > button:disabled { opacity: 1; cursor: not-allowed; color: #7C8090; box-shadow: var(--raise-sm); }
 .stButton > button[kind="primary"]:disabled, .stFormSubmitButton > button[kind="primary"]:disabled {
-  background: linear-gradient(145deg, #5A4A12, #3F340C); color: #A8955A; box-shadow: var(--raise-sm); border: 1px dashed rgba(255,227,71,.35);
+  background: #4A3E10; color: #A8955A; box-shadow: var(--raise-sm); border: 1px dashed rgba(255,227,71,.35);
 }
 
 /* inset inputs */
@@ -1630,7 +1630,7 @@ button, summary, [role="tab"], [data-baseweb="select"] > div, [data-baseweb="inp
 [data-testid="stChatInput"] > div:focus-within { outline: none !important; box-shadow: var(--inset), var(--neon-glow) !important; }
 .stButton > button:focus-visible, .stFormSubmitButton > button:focus-visible { outline: none !important; box-shadow: var(--neon-glow) !important; }
 .stButton > button[kind="primary"], .stFormSubmitButton > button[kind="primary"] {
-  background: linear-gradient(145deg, #FFEE70, #E6B800); box-shadow: var(--raise-sm), 0 0 16px rgba(255,227,71,.4);
+  background: #F2C400; box-shadow: var(--raise-sm), 0 0 16px rgba(255,227,71,.4);
 }
 [data-baseweb="input"], [data-baseweb="base-input"], [data-baseweb="select"] > div {
   border: 1px solid rgba(255,227,71,.12) !important;
@@ -1643,22 +1643,22 @@ button, summary, [role="tab"], [data-baseweb="select"] > div, [data-baseweb="inp
 [data-baseweb="checkbox"] > div:first-child { box-shadow: var(--inset); border-radius: 8px; border-color: transparent !important; }
 [data-baseweb="checkbox"] input:checked + div, [data-testid="stCheckbox"] [aria-checked="true"] { box-shadow: 0 0 10px rgba(255,227,71,.6); }
 [data-baseweb="slider"] [role="slider"] { background: var(--neon) !important; box-shadow: var(--raise-sm), 0 0 14px rgba(255,227,71,.7) !important; }
-[data-testid="stProgress"] [role="progressbar"] > div > div { background: linear-gradient(90deg, #E6B800, #FFEE70) !important; box-shadow: 0 0 12px rgba(255,227,71,.6); }
+[data-testid="stProgress"] [role="progressbar"] > div > div { background: #F2C400 !important; box-shadow: 0 0 12px rgba(255,227,71,.6); }
 /* alerts as tinted tiles */
 [data-testid="stAlert"] { border-left: 4px solid var(--neon) !important; }
 /* dividers glow softly, scrollbar styled */
-hr { background: linear-gradient(90deg, transparent, rgba(255,227,71,.35), transparent) !important; box-shadow: none !important; }
+hr { background: rgba(255,227,71,.3) !important; box-shadow: none !important; }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: var(--bg); box-shadow: var(--inset); border-radius: 999px; }
 ::-webkit-scrollbar-thumb { background: #3A3F4D; border-radius: 999px; border: 2px solid var(--bg); }
 ::-webkit-scrollbar-thumb:hover { background: #D9A400; }
 ::selection { background: rgba(255,227,71,.35); }
-/* pastel-style gradient tiles (dark-adapted from the reference) */
+/* flat pastel-style tiles (dark-adapted from the reference) */
 :root {
-  --tile-blue: linear-gradient(145deg, #2C3750 0%, #26304A 100%);
-  --tile-yellow: linear-gradient(145deg, #4A4220 0%, #2E2F3A 100%);
-  --tile-mix: linear-gradient(135deg, #4A4220 0%, #2A3350 100%);
-  --tile-ink: linear-gradient(145deg, #2B2F3A 0%, #23262E 100%);
+  --tile-blue: #2A344D;
+  --tile-yellow: #3E3921;
+  --tile-mix: #323650;
+  --tile-ink: #292D37;
 }
 [data-testid="stMetric"] { background: var(--tile-blue) !important; }
 [data-testid="stColumn"]:nth-child(even) [data-testid="stMetric"] { background: var(--tile-yellow) !important; }
@@ -1668,7 +1668,7 @@ hr { background: linear-gradient(90deg, transparent, rgba(255,227,71,.35), trans
 [data-testid="stExpander"] { background: var(--tile-blue) !important; }
 [data-testid="stForm"] { background: var(--tile-yellow) !important; }
 [data-testid="stAlert"] { background: var(--tile-mix) !important; }
-.st-key-new_meeting { background: linear-gradient(135deg, #5A4F1F 0%, #2E3A5C 100%) !important; }
+.st-key-new_meeting { background: #3E3C2E !important; }
 [data-testid="stMetricLabel"] { color: #AEB8D6; }
 [data-testid="stMetricValue"] { color: #FFE347; }
 /* unified button system: every button kind shares the same pill look */
@@ -1684,14 +1684,14 @@ hr { background: linear-gradient(90deg, transparent, rgba(255,227,71,.35), trans
 }
 [data-testid^="stBaseButton-"]:active:not(:disabled), [data-testid^="stBaseLinkButton-"]:active { box-shadow: var(--inset) !important; transform: none; }
 [data-testid="stBaseButton-primary"], [data-testid="stBaseButton-primaryFormSubmit"], [data-testid^="stBaseLinkButton-primary"] {
-  background: linear-gradient(145deg, #FFEE70, #E6B800) !important; color: #14100A !important; font-weight: 600;
+  background: #F2C400 !important; color: #14100A !important; font-weight: 600;
   box-shadow: var(--raise-sm), 0 0 16px rgba(255,227,71,.4);
 }
 [data-testid="stBaseButton-primary"]:hover:not(:disabled), [data-testid="stBaseButton-primaryFormSubmit"]:hover:not(:disabled) {
-  background: linear-gradient(145deg, #FFF39A, #F2C400) !important; color: #14100A !important; box-shadow: var(--raise), 0 0 22px rgba(255,227,71,.55);
+  background: #FFD92E !important; color: #14100A !important; box-shadow: var(--raise), 0 0 22px rgba(255,227,71,.55);
 }
 [data-testid="stBaseButton-primary"]:disabled, [data-testid="stBaseButton-primaryFormSubmit"]:disabled {
-  background: linear-gradient(145deg, #5A4A12, #3F340C) !important; color: #A8955A !important;
+  background: #4A3E10 !important; color: #A8955A !important;
   border: 1px dashed rgba(255,227,71,.35) !important; box-shadow: var(--raise-sm); opacity: 1; cursor: not-allowed;
 }
 [data-testid^="stBaseButton-"]:disabled:not([data-testid*="primary"]) { color: #7C8090 !important; opacity: 1; cursor: not-allowed; }
