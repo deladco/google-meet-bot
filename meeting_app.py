@@ -1516,28 +1516,79 @@ PAGE_SETTINGS = st.Page(settings_page, title="Settings", icon=":material/setting
 
 HOVER_CSS = """
 <style>
-button, summary, [role="tab"], [data-baseweb="select"] > div, [data-testid="stSidebarNavLink"],
-label:has(input[type="checkbox"]) { transition: background-color .15s ease, border-color .15s ease, color .15s ease; }
+:root {
+  --bg: #EDEDEE; --raise: 6px 6px 14px rgba(163,165,172,.55), -6px -6px 14px rgba(255,255,255,.95);
+  --raise-sm: 3px 3px 8px rgba(163,165,172,.5), -3px -3px 8px rgba(255,255,255,.9);
+  --inset: inset 3px 3px 7px rgba(163,165,172,.55), inset -3px -3px 7px rgba(255,255,255,.95);
+  --accent: #3B82F6;
+}
+.stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"] { background: var(--bg) !important; }
+.block-container { max-width: 1100px; padding-top: 2.5rem; }
+h1, h2, h3 { font-weight: 700 !important; letter-spacing: -.02em; color: #111; }
+h1 { font-size: 2.2rem !important; }
+hr { border: none !important; height: 2px; background: var(--bg); box-shadow: var(--inset); border-radius: 2px; }
+
+button, summary, [role="tab"], [data-baseweb="select"] > div, [data-baseweb="input"] {
+  transition: box-shadow .18s ease, background-color .18s ease, color .18s ease;
+}
+/* raised cards */
+[data-testid="stVerticalBlockBorderWrapper"], [data-testid="stExpander"], [data-testid="stMetric"],
+[data-testid="stForm"], [data-testid="stAlert"] {
+  background: var(--bg) !important; border: none !important; border-radius: 20px !important;
+  box-shadow: var(--raise); padding: 1rem 1.1rem;
+}
+[data-testid="stExpander"] details { border: none !important; }
+[data-testid="stExpander"] summary:hover { background: rgba(255,255,255,.5); border-radius: 14px; }
+[data-testid="stImage"] img { border-radius: 14px; }
+
+/* pill buttons */
+.stButton > button, .stDownloadButton > button, .stFormSubmitButton > button,
+[data-testid="stBaseButton-pills"], [data-testid="stBaseButton-segmented_control"] {
+  background: var(--bg); color: #222; border: none; border-radius: 999px;
+  box-shadow: var(--raise-sm); padding: .45rem 1.4rem;
+}
 .stButton > button:hover, .stDownloadButton > button:hover, .stFormSubmitButton > button:hover {
-  background-color: #2B2F45; border-color: #7C7CF0; color: #FFFFFF;
+  background: #E4E4E6; color: #000; box-shadow: var(--raise);
+}
+.stButton > button:active, .stDownloadButton > button:active, .stFormSubmitButton > button:active {
+  box-shadow: var(--inset);
+}
+.stButton > button:focus-visible, .stFormSubmitButton > button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.stButton > button[kind="primary"], .stFormSubmitButton > button[kind="primary"] {
+  background: linear-gradient(145deg, #9A9BA2, #7E7F86); color: #fff;
 }
 .stButton > button[kind="primary"]:hover, .stFormSubmitButton > button[kind="primary"]:hover {
-  background-color: #9494F5; border-color: #9494F5;
+  background: linear-gradient(145deg, #8E8F96, #72737A); color: #fff;
 }
-.stButton > button[kind="tertiary"]:hover { background-color: rgba(124,124,240,.16); color: #B8B8FF; }
-[data-testid="stExpander"] summary:hover { background-color: #262A3E; }
-[role="tab"]:hover { background-color: rgba(124,124,240,.14); color: #B8B8FF; }
-[data-baseweb="select"] > div:hover, [data-baseweb="input"]:hover { border-color: #7C7CF0; background-color: #262A3E; }
-[data-testid="stSidebarNavLink"]:hover { background-color: rgba(124,124,240,.18); }
-label:has(input[type="checkbox"]):hover { color: #B8B8FF; }
-[data-testid="stBaseButton-pills"]:hover, [data-testid="stBaseButton-segmented_control"]:hover {
-  background-color: #2B2F45; border-color: #7C7CF0;
+.stButton > button[kind="tertiary"] { box-shadow: none; background: transparent; }
+.stButton > button[kind="tertiary"]:hover { box-shadow: var(--raise-sm); }
+.stButton > button:disabled, .stFormSubmitButton > button:disabled { box-shadow: none; opacity: .55; }
+
+/* inset inputs */
+[data-baseweb="input"], [data-baseweb="base-input"], [data-baseweb="textarea"], [data-baseweb="select"] > div,
+[data-testid="stChatInput"] > div {
+  background: var(--bg) !important; border: none !important; border-radius: 999px !important; box-shadow: var(--inset);
 }
-.st-key-new_meeting {
-  border: 1px solid #7C7CF0 !important;
-  background: linear-gradient(135deg, #1E2130 0%, #23264A 100%);
-  padding: 1.25rem 1.5rem;
+[data-baseweb="textarea"] { border-radius: 20px !important; }
+[data-baseweb="input"] input, [data-baseweb="base-input"] input, [data-baseweb="textarea"] textarea { background: transparent !important; }
+[data-baseweb="input"]:focus-within, [data-baseweb="textarea"]:focus-within, [data-baseweb="select"] > div:focus-within {
+  outline: 2px solid var(--accent); outline-offset: 2px;
 }
+
+/* tabs as soft segmented pills */
+[data-baseweb="tab-list"] { gap: .5rem; background: transparent; }
+[role="tab"] { border-radius: 999px; padding: .4rem 1.1rem; box-shadow: var(--raise-sm); background: var(--bg); }
+[role="tab"][aria-selected="true"] { box-shadow: var(--inset); color: #111; }
+[role="tab"]:hover { color: #000; }
+[data-baseweb="tab-highlight"], [data-baseweb="tab-border"] { display: none; }
+
+/* top navigation links */
+[data-testid="stSidebarNavLink"], [data-testid="stTopNavLink"] { border-radius: 999px; }
+[data-testid="stSidebarNavLink"]:hover { background: rgba(255,255,255,.6); }
+[data-baseweb="slider"] [role="slider"] { box-shadow: var(--raise-sm); background: #F7F7F8 !important; }
+[data-testid="stProgress"] > div > div { background: var(--bg); box-shadow: var(--inset); border-radius: 999px; }
+
+.st-key-new_meeting { padding: 1.5rem 1.75rem; }
 .st-key-new_meeting [data-testid="stTextInput"] input {
   font-size: 1.15rem; min-height: 3.4rem; padding-left: 1rem;
 }
