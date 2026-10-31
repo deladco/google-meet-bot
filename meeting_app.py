@@ -94,8 +94,8 @@ LANDING_STEPS = [
 
 
 def landing_intro():
-    logo_column, name_column = st.columns([2, 5], vertical_alignment="center")
-    logo_column.image(str(LOGO_FILE), width=260)
+    logo_column, name_column = st.columns([1, 5], vertical_alignment="center")
+    logo_column.image(str(LOGO_FILE), width=110)
     name_column.markdown("# Meet AI!")
     st.markdown("### Turn every meeting into clear notes, decisions and tasks.")
     st.write(
@@ -1599,7 +1599,8 @@ button, summary, [role="tab"], [data-baseweb="select"] > div, [data-baseweb="inp
   box-shadow: 4px 4px 12px rgba(10,11,15,.55), -4px -4px 12px rgba(58,63,77,.3);
 }
 [data-testid="stTopNavLink"]:hover { transform: translateY(-1px); }
-[data-testid="stHeader"] { min-height: 4.5rem; }
+[data-testid="stHeader"] { min-height: 5.5rem; }
+[data-testid="stHeaderLogo"], [data-testid="stLogo"] { height: 4.5rem !important; max-height: none !important; width: auto; }
 [data-baseweb="slider"] [role="slider"] { box-shadow: var(--raise-sm); background: #D9A400 !important; }
 [data-testid="stProgress"] > div > div { background: var(--bg); box-shadow: var(--inset); border-radius: 999px; }
 
