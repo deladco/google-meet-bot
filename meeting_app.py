@@ -1731,6 +1731,20 @@ hr { background: rgba(255,122,26,.3) !important; box-shadow: none !important; }
   background: #25384D !important; color: #6F86A0 !important;
 }
 [data-testid="stBaseButton-tertiary"]:hover:not(:disabled) { color: #6FB1EA !important; }
+/* light blue (from the logo) on secondary buttons */
+[data-testid="stBaseButton-secondary"], [data-testid="stBaseButton-secondaryFormSubmit"], [data-testid^="stBaseLinkButton-secondary"], [data-testid="stPopoverButton"] {
+  background: #8DB8DE !important; color: #10243A !important; font-weight: 600;
+}
+[data-testid="stBaseButton-secondary"]:hover:not(:disabled), [data-testid="stBaseButton-secondaryFormSubmit"]:hover:not(:disabled),
+[data-testid^="stBaseLinkButton-secondary"]:hover {
+  background: #A9CDEC !important; color: #0B1B2D !important; box-shadow: var(--raise), 0 0 16px rgba(141,184,222,.55) !important;
+}
+[data-testid="stBaseButton-secondary"]:disabled, [data-testid="stBaseButton-secondaryFormSubmit"]:disabled {
+  background: #2B3B4D !important; color: #71859B !important;
+}
+[data-testid="stBaseButton-pills"], [data-testid="stBaseButton-segmented_control"] { color: #BBD6EE !important; border: 1px solid rgba(141,184,222,.35) !important; }
+[data-testid="stBaseButton-tertiary"] { color: #8DB8DE !important; }
+[data-testid="stBaseButton-tertiary"]:hover:not(:disabled) { color: #BBD6EE !important; }
 @media (max-width: 640px) {
   .block-container { padding: 3.5rem 1rem 5rem; }
   .stDownloadButton > button, .stFormSubmitButton > button { width: 100%; }
