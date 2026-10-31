@@ -96,7 +96,7 @@ LANDING_STEPS = [
 def landing_intro():
     logo_column, name_column = st.columns([1, 5], vertical_alignment="center")
     logo_column.image(str(LOGO_FILE), width=110)
-    name_column.markdown("# Daryna's AI Meetings Assistant")
+    name_column.markdown("# Meet AI!")
     st.markdown("### Turn every meeting into clear notes, decisions and tasks.")
     st.write(
         "An AI assistant that joins your calls, writes down what was said in "
@@ -1520,7 +1520,7 @@ HOVER_CSS = """
   --bg: #23262E; --raise: 6px 6px 14px rgba(10,11,15,.75), -6px -6px 14px rgba(58,63,77,.45);
   --raise-sm: 3px 3px 8px rgba(10,11,15,.7), -3px -3px 8px rgba(58,63,77,.4);
   --inset: inset 3px 3px 7px rgba(10,11,15,.75), inset -3px -3px 7px rgba(58,63,77,.4);
-  --accent: #FFD633;
+  --accent: #D9A400;
 }
 .stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"] { background: var(--bg) !important; }
 .block-container { max-width: 1100px; padding-top: 2.5rem; }
@@ -1548,17 +1548,17 @@ button, summary, [role="tab"], [data-baseweb="select"] > div, [data-baseweb="inp
   box-shadow: var(--raise-sm); padding: .45rem 1.4rem;
 }
 .stButton > button:hover, .stDownloadButton > button:hover, .stFormSubmitButton > button:hover {
-  background: #2A2E38; color: #FFD633; box-shadow: var(--raise);
+  background: #2A2E38; color: #D9A400; box-shadow: var(--raise);
 }
 .stButton > button:active, .stDownloadButton > button:active, .stFormSubmitButton > button:active {
   box-shadow: var(--inset);
 }
 .stButton > button:focus-visible, .stFormSubmitButton > button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .stButton > button[kind="primary"], .stFormSubmitButton > button[kind="primary"] {
-  background: linear-gradient(145deg, #FFE066, #F5B800); color: #1A1500; font-weight: 600;
+  background: linear-gradient(145deg, #E0AB10, #A87800); color: #14100A; font-weight: 600;
 }
 .stButton > button[kind="primary"]:hover, .stFormSubmitButton > button[kind="primary"]:hover {
-  background: linear-gradient(145deg, #FFEB8A, #FFC81A); color: #1A1500;
+  background: linear-gradient(145deg, #E8B923, #C48D00); color: #14100A;
 }
 .stButton > button[kind="tertiary"] { box-shadow: none; background: transparent; }
 .stButton > button[kind="tertiary"]:hover { box-shadow: var(--raise-sm); }
@@ -1578,14 +1578,14 @@ button, summary, [role="tab"], [data-baseweb="select"] > div, [data-baseweb="inp
 /* tabs as soft segmented pills */
 [data-baseweb="tab-list"] { gap: .5rem; background: transparent; }
 [role="tab"] { border-radius: 999px; padding: .4rem 1.1rem; box-shadow: var(--raise-sm); background: var(--bg); }
-[role="tab"][aria-selected="true"] { box-shadow: var(--inset); color: #FFD633; }
-[role="tab"]:hover { color: #FFD633; }
+[role="tab"][aria-selected="true"] { box-shadow: var(--inset); color: #D9A400; }
+[role="tab"]:hover { color: #D9A400; }
 [data-baseweb="tab-highlight"], [data-baseweb="tab-border"] { display: none; }
 
 /* top navigation links */
 [data-testid="stSidebarNavLink"], [data-testid="stTopNavLink"] { border-radius: 999px; }
-[data-testid="stSidebarNavLink"]:hover { background: rgba(255,214,51,.12); }
-[data-baseweb="slider"] [role="slider"] { box-shadow: var(--raise-sm); background: #FFD633 !important; }
+[data-testid="stSidebarNavLink"]:hover { background: rgba(217,164,0,.14); }
+[data-baseweb="slider"] [role="slider"] { box-shadow: var(--raise-sm); background: #D9A400 !important; }
 [data-testid="stProgress"] > div > div { background: var(--bg); box-shadow: var(--inset); border-radius: 999px; }
 
 .st-key-new_meeting { padding: 1.5rem 1.75rem; }
