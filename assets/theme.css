@@ -175,6 +175,19 @@ hr { border: none !important; height: 2px; background: rgba(156,195,234,.18) !im
 ::-webkit-scrollbar-thumb { background: #2B4568; border-radius: 999px; border: 2px solid var(--inset-bg); }
 ::-webkit-scrollbar-thumb:hover { background: var(--orange); }
 
+/* small pencil rename control beside meeting names */
+[class*="st-key-renamebtn_"] { display: flex; justify-content: flex-end; }
+[class*="st-key-renamebtn_"] [data-testid="stPopoverButton"] {
+  background: transparent !important; box-shadow: none !important; color: var(--muted) !important;
+  min-height: 1.9rem; height: 1.9rem; width: 1.9rem; padding: 0 !important; border-radius: 999px !important;
+}
+[class*="st-key-renamebtn_"] [data-testid="stPopoverButton"] > div:not(:first-child),
+[class*="st-key-renamebtn_"] [data-testid="stPopoverButton"] [data-testid="stIconMaterial"] ~ * { display: none; }
+[class*="st-key-renamebtn_"] [data-testid="stPopoverButton"] [data-testid="stIconMaterial"] { font-size: 1.1rem !important; margin: 0; }
+[class*="st-key-renamebtn_"] [data-testid="stPopoverButton"]:hover {
+  background: var(--surface-2) !important; color: var(--orange) !important; box-shadow: var(--raise-sm) !important;
+}
+
 @media (max-width: 640px) {
   .block-container { padding: 3.5rem 1rem 5rem; }
   .stDownloadButton > button, .stFormSubmitButton > button { width: 100%; }

@@ -306,10 +306,25 @@ def minutes_list(meeting, key):
     return value if isinstance(value, list) else []
 
 
+TITLES_FILE = PROJECT_DIR / "meeting_titles.json"
+
+
+def load_title_overrides():
+    """Custom names for meetings that have no cloud minutes to hold one (local-only, processing, failed)."""
+    try:
+        data = json.loads(TITLES_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
 def meeting_title(meeting):
     custom = (meeting["minutes"] or {}).get("title")
     if isinstance(custom, str) and custom.strip():
         return custom.strip()
+    override = load_title_overrides().get(str(meeting["id"]))
+    if override:
+        return str(override)
     topics = minutes_list(meeting, "discussion_topics")
     if topics and topics[0].get("topic"):
         return str(topics[0]["topic"])
@@ -850,19 +865,40 @@ SORT_OPTIONS = ["Newest first", "Oldest first", "Most action items", "Title A-Z"
 
 
 def rename_meeting(meeting, new_title):
-    minutes = dict(meeting["minutes"])
     new_title = " ".join(new_title.split())
+    if meeting["source"] == "cloud" and meeting["minutes"]:
+        minutes = dict(meeting["minutes"])
+        if new_title:
+            minutes["title"] = new_title
+        else:
+            minutes.pop("title", None)  # empty name restores the automatic title
+        return persist_minutes(meeting, minutes, "Meeting renamed")
+    overrides = load_title_overrides()
     if new_title:
-        minutes["title"] = new_title
+        overrides[str(meeting["id"])] = new_title
     else:
-        minutes.pop("title", None)  # empty name restores the automatic title
-    return persist_minutes(meeting, minutes, "Meeting renamed")
+        overrides.pop(str(meeting["id"]), None)
+    try:
+        TITLES_FILE.write_text(json.dumps(overrides, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError as error:
+        st.error(f"Could not save the name: {error}")
+        return False
+    st.toast("Meeting renamed", icon=":material/check_circle:")
+    return True
 
 
 def meeting_card(meeting, key_prefix, show_open=True):
     """Compact, mobile-friendly summary of one meeting."""
     with st.container(border=True):
-        st.markdown(f"**{meeting_title(meeting)}**")
+        title_column, pencil_column = st.columns([12, 1], vertical_alignment="center", gap="small")
+        title_column.markdown(f"**{meeting_title(meeting)}**")
+        with pencil_column.container(key=f"renamebtn_{key_prefix}_{meeting['id']}"):
+            with st.popover("", icon=":material/edit:", help="Rename meeting"):
+                with st.form(f"rename_form_{key_prefix}_{meeting['id']}", border=False):
+                    new_title = st.text_input("Meeting name", value=meeting_title(meeting), max_chars=120)
+                    if st.form_submit_button("Save name", type="primary", icon=":material/check:"):
+                        if rename_meeting(meeting, new_title):
+                            st.rerun()
         if meeting["minutes"]:
             detail = (
                 f"{len(minutes_list(meeting, 'decisions'))} decisions · "
@@ -871,17 +907,8 @@ def meeting_card(meeting, key_prefix, show_open=True):
         else:
             detail = status_label(meeting)
         st.caption(f"{when_label(meeting['recorded_at'])} · {detail}")
-        can_rename = meeting["source"] == "cloud" and bool(meeting["minutes"])
-        open_column, rename_column = st.columns([1, 1], vertical_alignment="center")
-        if show_open and open_column.button("Open", key=f"{key_prefix}_{meeting['id']}", type="tertiary", icon=":material/arrow_forward:"):
+        if show_open and st.button("Open", key=f"{key_prefix}_{meeting['id']}", type="tertiary", icon=":material/arrow_forward:"):
             open_meeting(meeting["id"])
-        if can_rename:
-            with rename_column.popover("Rename", icon=":material/edit:"):
-                with st.form(f"rename_form_{key_prefix}_{meeting['id']}", border=False):
-                    new_title = st.text_input("Meeting name", value=meeting_title(meeting), max_chars=120)
-                    if st.form_submit_button("Save name", type="primary", icon=":material/check:"):
-                        if rename_meeting(meeting, new_title):
-                            st.rerun()
 
 
 def first_meeting_help():
