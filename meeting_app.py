@@ -1556,8 +1556,10 @@ label:has(input[type="checkbox"]):hover { color: #B8B8FF; }
 st.markdown(HOVER_CSS, unsafe_allow_html=True)
 
 st.logo(str(LOGO_FILE), size="large")
-navigation = st.navigation([PAGE_DASHBOARD, PAGE_MEETINGS, PAGE_CHAT, PAGE_ACTIONS, PAGE_SETTINGS])
-with st.sidebar:
-    st.caption(f"Signed in as {st.session_state['supabase_user']}" if st.session_state.get("supabase_user") else "")
-    st.caption("Created by Daryna Ladanovska · Version 1.1")
+navigation = st.navigation([PAGE_DASHBOARD, PAGE_MEETINGS, PAGE_CHAT, PAGE_ACTIONS, PAGE_SETTINGS], position="top")
 navigation.run()
+st.divider()
+footer = "Created by Daryna Ladanovska · Version 1.1"
+if st.session_state.get("supabase_user"):
+    footer = f"Signed in as {st.session_state['supabase_user']} · {footer}"
+st.caption(footer)
