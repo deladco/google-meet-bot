@@ -563,6 +563,8 @@ def new_meeting_section():
         )
         if bot_url and not link_ok:
             st.warning("That doesn't look like a Google Meet, Zoom or Teams link.")
+        if not bot_url:
+            st.caption("Paste a meeting link above to enable this button.")
         if st.button(
             "Send bot to meeting",
             type="primary",
@@ -1562,7 +1564,10 @@ button, summary, [role="tab"], [data-baseweb="select"] > div, [data-baseweb="inp
 }
 .stButton > button[kind="tertiary"] { box-shadow: none; background: transparent; }
 .stButton > button[kind="tertiary"]:hover { box-shadow: var(--raise-sm); }
-.stButton > button:disabled, .stFormSubmitButton > button:disabled { box-shadow: none; opacity: .55; }
+.stButton > button:disabled, .stFormSubmitButton > button:disabled { opacity: 1; cursor: not-allowed; color: #7C8090; box-shadow: var(--raise-sm); }
+.stButton > button[kind="primary"]:disabled, .stFormSubmitButton > button[kind="primary"]:disabled {
+  background: linear-gradient(145deg, #5A4A12, #3F340C); color: #A8955A; box-shadow: var(--raise-sm); border: 1px dashed rgba(255,227,71,.35);
+}
 
 /* inset inputs */
 [data-baseweb="input"], [data-baseweb="base-input"], [data-baseweb="textarea"], [data-baseweb="select"] > div,
