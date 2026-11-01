@@ -868,18 +868,33 @@ def day_label(day):
 
 def agenda_section(meetings):
     agenda = calendar_agenda()
-    days = {}
-    for event in agenda["events"] or []:
-        days.setdefault(event["start"].astimezone().date(), []).append(("event", event["start"], event))
     today = datetime.now().astimezone().date()
+    now = datetime.now(timezone.utc)
+    entries = {}
+    used = set()
+    for event in agenda["events"] or []:
+        match = next(
+            (
+                m
+                for m in meetings
+                if m["id"] not in used
+                and (when := parse_when(m["recorded_at"]))
+                and abs((when - event["start"]).total_seconds()) <= 45 * 60
+            ),
+            None,
+        )
+        if match:
+            used.add(match["id"])
+        entries.setdefault(event["start"].astimezone().date(), []).append((event["start"], event, match))
     for meeting in meetings:
         when = parse_when(meeting["recorded_at"])
-        if when and today - timedelta(days=1) <= when.astimezone().date() <= today:
-            days.setdefault(when.astimezone().date(), []).append(("meeting", when, meeting))
-    if agenda["events"] is None and not days:
+        if meeting["id"] in used or not when or not (today - timedelta(days=1) <= when.astimezone().date() <= today):
+            continue
+        entries.setdefault(when.astimezone().date(), []).append((when, None, meeting))
+    if agenda["events"] is None and not entries:
         return
     header, refresh = st.columns([4, 1], vertical_alignment="center")
-    header.subheader("Your days", anchor=False)
+    header.subheader("Your calendar", anchor=False)
     if agenda["feed"] and refresh.button("Sync calendar", icon=":material/sync:", key="sync_calendar", type="tertiary"):
         calendar_agenda(force=True)
         st.rerun()
@@ -887,36 +902,50 @@ def agenda_section(meetings):
         st.warning(f"Could not sync your calendar: {agenda['error']}")
     elif agenda["feed"]:
         st.caption(
-            "Synced with your calendar when you signed in. "
-            + ("The bot joins these meetings automatically." if agenda["feed"].get("enabled") else "Automatic joining is off.")
+            "Synced when you signed in. Click a recorded meeting to open its notes. "
+            + ("The bot joins meetings automatically." if agenda["feed"].get("enabled") else "Automatic joining is off.")
         )
-    if not days:
+    if not entries:
         st.caption("No meetings with a video link in the next 7 days.")
-    now = datetime.now(timezone.utc)
-    for day in sorted(days):
-        with st.container(border=True, key=f"agenda_{day.isoformat()}"):
-            st.markdown(f"**{day_label(day)}** · {day.strftime('%d %b')}")
-            for kind, when, item in sorted(days[day], key=lambda entry: entry[1]):
-                time_text = when.astimezone().strftime("%H:%M")
-                if kind == "meeting":
-                    st.markdown(f":material/check_circle: {time_text} · {meeting_title(item)} · recorded")
-                    continue
-                line, action = st.columns([4, 1], vertical_alignment="center")
-                line.markdown(f":material/event: {time_text} · {item['title']}")
-                if day == today and item["start"] + timedelta(hours=1) > now and action.button(
-                    "Send bot", key=f"agenda_bot_{item['key']}", type="tertiary", icon=":material/smart_toy:"
-                ):
-                    try:
-                        st.session_state["active_bot_id"] = meeting_bot.join_meeting(
-                            auth_db.client_for_user(),
-                            item["link"],
-                            (agenda["feed"] or {}).get("bot_name") or "AI Assistant",
-                            viewer_email,
-                        )
-                        st.toast("Bot queued. Admit it from the lobby if asked.")
-                    except Exception as error:
-                        st.error(f"Could not queue the bot: {error}")
-
+        return
+    with st.container(border=True, key="calendar_agenda", height=440):
+        for day in sorted(entries):
+            badge, rows = st.columns([1, 7], gap="small")
+            badge.markdown(
+                f"<div class='cal-badge{' cal-today' if day == today else ''}'>"
+                f"<span>{day.strftime('%a')}</span><b>{day.day}</b><span>{day.strftime('%b')}</span></div>",
+                unsafe_allow_html=True,
+            )
+            with rows:
+                if day == today or day == today + timedelta(days=1) or day == today - timedelta(days=1):
+                    st.caption(day_label(day))
+                for start, event, meeting in sorted(entries[day], key=lambda entry: entry[0]):
+                    time_col, title_col, action_col = st.columns([1, 5, 2], vertical_alignment="center")
+                    time_col.markdown(f"**{start.astimezone().strftime('%H:%M')}**")
+                    entry_key = (event or {}).get("key") or meeting["id"]
+                    if meeting:
+                        label = (event or {}).get("title") or meeting_title(meeting)
+                        if title_col.button(
+                            label, key=f"cal_open_{entry_key}", icon=":material/description:", type="tertiary"
+                        ):
+                            open_meeting(meeting["id"])
+                        action_col.caption("notes ready")
+                    else:
+                        title_col.markdown(f":material/event: {event['title']}")
+                        if event["start"] + timedelta(hours=1) > now and action_col.button(
+                            "Send bot", key=f"cal_bot_{entry_key}", type="tertiary", icon=":material/smart_toy:"
+                        ):
+                            try:
+                                st.session_state["active_bot_id"] = meeting_bot.join_meeting(
+                                    auth_db.client_for_user(),
+                                    event["link"],
+                                    (agenda["feed"] or {}).get("bot_name") or "AI Assistant",
+                                    viewer_email,
+                                )
+                                st.toast("Bot queued. Admit it from the lobby if asked.")
+                            except Exception as error:
+                                st.error(f"Could not queue the bot: {error}")
+            st.divider()
 
 def dashboard_page():
     meetings = load_meetings()
@@ -924,6 +953,7 @@ def dashboard_page():
     hours = sum(meeting_duration_hours(m) for m in meetings)
 
     st.title("Chief Communication Officer")
+    agenda_section(meetings)
     with st.container(border=True, key="new_meeting"):
         st.subheader("Start a new meeting", anchor=False)
         st.caption("Paste a meeting link and the AI joins, records and writes your notes. Or record or upload audio.")
@@ -939,8 +969,6 @@ def dashboard_page():
         with column.container(key=key):
             if st.button(f"{value}\n\n{label}", key=f"{key}_open", help=tip, width="stretch"):
                 st.switch_page(page)
-
-    agenda_section(meetings)
 
     projects_section(meetings)
 

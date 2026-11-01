@@ -215,3 +215,13 @@ hr { border: none !important; height: 2px; background: rgba(156,195,234,.18) !im
 .st-key-metric_meetings button p:first-child, .st-key-metric_actions button p:first-child, .st-key-metric_hours button p:first-child {
   font-size: 2.4rem; font-weight: 700; line-height: 1.2; color: #E8EEF7; margin-bottom: .25rem;
 }
+
+/* Dashboard calendar: date badges, chronological */
+.st-key-calendar_agenda { background: #0B1523; }
+.cal-badge { display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.1;
+  padding: .5rem .2rem; border-radius: 14px; background: #1B3354; color: #9CC3EA;
+  border: 1px solid rgba(156,195,234,.25); box-shadow: 4px 4px 10px rgba(5,10,20,.5), -3px -3px 8px rgba(63,127,200,.10); }
+.cal-badge span { font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; }
+.cal-badge b { font-size: 1.5rem; color: #E8EEF7; }
+.cal-badge.cal-today { background: #FF7A1A; color: #1A0E05; border-color: #FF9140; box-shadow: 0 0 14px rgba(255,122,26,.45); }
+.cal-badge.cal-today b { color: #1A0E05; }
