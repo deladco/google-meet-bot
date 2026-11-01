@@ -212,16 +212,28 @@ def analyze_meeting(transcript_path=DEFAULT_TRANSCRIPT_FILE):
 		{"role": "user", "content": conversation}
 	]
 	response = None
+	minutes = None
 	for attempt in range(4):
 		try:
+			# Later attempts drop strict JSON mode, which can yield empty output on long transcripts.
+			kwargs = {"format": "json"} if attempt < 2 else {}
 			response = get_ollama_client().chat(
 				model=MODEL,
-				format="json",
 				think=False,
-				options={"temperature": 0},
+				options={"temperature": 0 if attempt < 2 else 0.2, "num_ctx": 32768},
 				messages=messages,
+				**kwargs,
 			)
+			try:
+				minutes = _parse_minutes_response(response)
+			except ValueError:
+				if attempt == 3:
+					raise
+				time.sleep(2)
+				continue
 			break
+		except ValueError:
+			raise
 		except Exception as error:
 			status = getattr(error, "status_code", None)
 			transient = status in (429, 500, 502, 503, 504) or isinstance(
@@ -236,7 +248,6 @@ def analyze_meeting(transcript_path=DEFAULT_TRANSCRIPT_FILE):
 				raise
 			time.sleep(3 * 2**attempt)
 
-	minutes = _parse_minutes_response(response)
 	minutes["summary_refs"] = _references(minutes.get("summary_refs", []), entries)
 	for key in ("discussion_topics", "decisions", "action_items", "unresolved_questions"):
 		minutes[key] = _attach_references(minutes.get(key, []), entries, key)
