@@ -337,7 +337,7 @@ def meeting_title(meeting):
     topics = minutes_list(meeting, "discussion_topics")
     if topics and topics[0].get("topic"):
         return str(topics[0]["topic"])
-    return f"Meeting Â· {when_full(meeting['recorded_at'])}"
+    return f"Meeting · {when_full(meeting['recorded_at'])}"
 
 
 def meeting_duration_hours(meeting):
@@ -428,7 +428,7 @@ def show_processing_result(result):
     if result["status"] == "completed":
         st.success(f"Meeting processed: {result['meeting_id']}")
         st.caption(
-            f"{result['action_item_count']} action items Â· "
+            f"{result['action_item_count']} action items · "
             f"Speaker identification: {result['diarization_status'].replace('unavailable', 'not available')}"
         )
         notes_path = Path(result["notes_path"])
@@ -555,7 +555,7 @@ def new_meeting_section():
 
     if audio_source == "Browser microphone":
         st.caption(
-            "Use the recorderâ€™s Start/Stop controls. This captures your browser microphone, "
+            "Use the recorder’s Start/Stop controls. This captures your browser microphone, "
             "not Meet tab or system audio."
         )
         if not consent_confirmed:
@@ -693,8 +693,8 @@ def show_sources(passages):
     with st.expander(f"Sources ({len(passages)})"):
         for number, passage in enumerate(passages, start=1):
             st.markdown(
-                f"**[{number}]** `{passage['meeting_id']}` Â· "
-                f"{str(passage.get('recorded_at') or '')[:16]} Â· {passage['kind']}"
+                f"**[{number}]** `{passage['meeting_id']}` · "
+                f"{str(passage.get('recorded_at') or '')[:16]} · {passage['kind']}"
             )
             st.text(passage["content"][:600])
 
@@ -809,7 +809,7 @@ def projects_section(meetings):
             for column, (name, counts) in zip(columns, entries[start : start + 3]):
                 with column.container(border=True):
                     st.markdown(f"**{name}**")
-                    st.caption(f"{counts['open']} open Â· {counts['done']} done")
+                    st.caption(f"{counts['open']} open · {counts['done']} done")
                     if st.button("Open tasks", key=f"open_project_{name}", type="tertiary", icon=":material/arrow_forward:"):
                         open_task_board(name)
         add_project_form("add_project_dashboard")
@@ -1038,12 +1038,12 @@ def meeting_card(meeting, key_prefix, show_open=True):
                             st.rerun()
         if meeting["minutes"]:
             detail = (
-                f"{len(minutes_list(meeting, 'decisions'))} decisions Â· "
+                f"{len(minutes_list(meeting, 'decisions'))} decisions · "
                 f"{len(minutes_list(meeting, 'action_items'))} actions"
             )
         else:
             detail = status_label(meeting)
-        st.caption(f"{when_label(meeting['recorded_at'])} Â· {detail}")
+        st.caption(f"{when_label(meeting['recorded_at'])} · {detail}")
         if show_open and st.button("Open", key=f"{key_prefix}_{meeting['id']}", type="tertiary", icon=":material/arrow_forward:"):
             open_meeting(meeting["id"])
 
@@ -1152,7 +1152,7 @@ def show_minutes(meeting):
     info = minutes_store.review(minutes)
     if approved:
         st.success(
-            f"Approved{' by ' + info['approved_by'] if info.get('approved_by') else ''} Â· {when_full(info.get('approved_at'))}",
+            f"Approved{' by ' + info['approved_by'] if info.get('approved_by') else ''} · {when_full(info.get('approved_at'))}",
             icon=":material/verified:",
         )
     else:
@@ -1203,10 +1203,10 @@ def show_minutes(meeting):
                 st.markdown(f"~~{item.get('task', '')}~~" if done else f"**{item.get('task', '')}**")
                 due = minutes_store.parse_due(item.get("due"))
                 st.caption(
-                    f"Owner: {item.get('owner') or 'Not specified'} Â· "
+                    f"Owner: {item.get('owner') or 'Not specified'} · "
                     f"Deadline: {item.get('deadline') or 'Not specified'}"
-                    + (f" Â· Due {due.strftime('%d %b %Y')}" if due else "")
-                    + (" Â· Done" if done else "")
+                    + (f" · Due {due.strftime('%d %b %Y')}" if due else "")
+                    + (" · Done" if done else "")
                 )
                 sources_caption(item)
         st.page_link(PAGE_ACTIONS, label="Track these on the task board", icon=":material/checklist:")
@@ -1275,9 +1275,9 @@ def edit_minutes_form(meeting):
 def show_meeting(meeting):
     st.header(meeting_title(meeting))
     st.caption(
-        f"{when_full(meeting['recorded_at'])} Â· {status_label(meeting)} Â· "
+        f"{when_full(meeting['recorded_at'])} · {status_label(meeting)} · "
         f"{'Saved in cloud' if meeting['source'] == 'cloud' else 'This server only'}"
-        + (f" Â· Recorded by {meeting['owner_email']}" if viewer_sees_all and meeting["owner_email"] else "")
+        + (f" · Recorded by {meeting['owner_email']}" if viewer_sees_all and meeting["owner_email"] else "")
     )
     if meeting["error"]:
         st.warning(meeting["error"])
@@ -1438,7 +1438,7 @@ def due_label(row, today):
         return "No due date"
     text = row["due"].strftime("%d %b")
     if bucket == "overdue":
-        return f":red[Overdue Â· {text}]"
+        return f":red[Overdue · {text}]"
     if bucket == "today":
         return ":orange[Due today]"
     return f"Due {text}"
@@ -1457,8 +1457,8 @@ def task_card(row, today, project_names):
             on_change=update_task,
             args=(meeting["id"], row["id"], f"done_{base}", "status"),
         )
-        project_tag = f"{row['project']} Â· " if row["project"] else ""
-        st.caption(f"{project_tag}{row['owner']} Â· {due_label(row, today)} Â· {meeting_title(meeting)}")
+        project_tag = f"{row['project']} · " if row["project"] else ""
+        st.caption(f"{project_tag}{row['owner']} · {due_label(row, today)} · {meeting_title(meeting)}")
         options = [NO_PROJECT, *project_names]
         project_key = f"project_{base}_{row['project']}"
         st.selectbox(
@@ -1761,9 +1761,9 @@ def settings_page():
             "Pick one language only if the meeting is entirely in it. The AI bot uses WHISPER_LANGUAGE on its host.",
         )
         st.caption(
-            f"Model: {os.getenv('WHISPER_MODEL') or 'automatic (large-v3-turbo on GPU, small on CPU)'} Â· "
-            f"Audio cleanup: {'off' if os.getenv('AUDIO_CLEANUP') == '0' else 'on'} Â· "
-            f"Spelling correction: {'off' if os.getenv('TRANSCRIPT_LLM_CORRECTION') == '0' else 'on'} Â· "
+            f"Model: {os.getenv('WHISPER_MODEL') or 'automatic (large-v3-turbo on GPU, small on CPU)'} · "
+            f"Audio cleanup: {'off' if os.getenv('AUDIO_CLEANUP') == '0' else 'on'} · "
+            f"Spelling correction: {'off' if os.getenv('TRANSCRIPT_LLM_CORRECTION') == '0' else 'on'} · "
             f"Vocabulary learning: {'off' if os.getenv('VOCABULARY_LEARNING') == '0' else 'on'}"
         )
 
@@ -1790,7 +1790,7 @@ def settings_page():
         ollama_host = get_ollama_host()
         api_key_configured = bool(get_setting("OLLAMA_API_KEY"))
         st.caption(
-            f"Endpoint: {ollama_target_label(ollama_host)} Â· "
+            f"Endpoint: {ollama_target_label(ollama_host)} · "
             f"API key: {'configured' if api_key_configured else 'missing'}"
         )
         if st.button("Test connection", disabled=not api_key_configured, key="test_ollama_connection"):
@@ -1829,7 +1829,7 @@ navigation = st.navigation([PAGE_DASHBOARD, PAGE_MEETINGS, PAGE_CHAT, PAGE_ACTIO
 handle_google_callback()
 navigation.run()
 st.divider()
-footer = "Created by Daryna Ladanovska Â· Version 1.1"
+footer = "Created by Daryna Ladanovska · Version 1.1"
 if st.session_state.get("supabase_user"):
-    footer = f"Signed in as {st.session_state['supabase_user']} Â· {footer}"
+    footer = f"Signed in as {st.session_state['supabase_user']} · {footer}"
 st.caption(footer)
