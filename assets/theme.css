@@ -195,3 +195,9 @@ hr { border: none !important; height: 2px; background: rgba(156,195,234,.18) !im
   [data-testid="stChatInput"] { padding-bottom: .5rem; }
   h1 { font-size: 1.7rem !important; }
 }
+
+/* Dashboard metric tiles are clickable: an invisible button covers the whole tile */
+.st-key-metric_meetings, .st-key-metric_actions, .st-key-metric_hours { position: relative; cursor: pointer; transition: transform .15s ease; }
+.st-key-metric_meetings:hover, .st-key-metric_actions:hover, .st-key-metric_hours:hover { transform: translateY(-2px); }
+.st-key-metric_meetings [data-testid="stButton"], .st-key-metric_actions [data-testid="stButton"], .st-key-metric_hours [data-testid="stButton"] { position: absolute; inset: 0; z-index: 2; }
+.st-key-metric_meetings [data-testid="stButton"] button, .st-key-metric_actions [data-testid="stButton"] button, .st-key-metric_hours [data-testid="stButton"] button { width: 100%; height: 100%; opacity: 0; cursor: pointer; }

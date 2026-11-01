@@ -844,9 +844,16 @@ def dashboard_page():
         new_meeting_section()
 
     metric_columns = st.columns(3)
-    metric_columns[0].metric("Meetings", len(meetings), border=True)
-    metric_columns[1].metric("Action items", len(actions), border=True)
-    metric_columns[2].metric("Hours transcribed", f"{hours:.1f}", border=True)
+    metric_cards = [
+        ("metric_meetings", "Meetings", len(meetings), PAGE_MEETINGS, "Open My Meetings"),
+        ("metric_actions", "Action items", len(actions), PAGE_ACTIONS, "Open the task board"),
+        ("metric_hours", "Hours transcribed", f"{hours:.1f}", PAGE_MEETINGS, "Open My Meetings"),
+    ]
+    for column, (key, label, value, page, tip) in zip(metric_columns, metric_cards):
+        with column.container(key=key):
+            st.metric(label, value, border=True)
+            if st.button(tip, key=f"{key}_open", help=tip, type="tertiary"):
+                st.switch_page(page)
 
     projects_section(meetings)
 
