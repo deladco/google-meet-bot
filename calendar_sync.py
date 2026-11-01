@@ -89,15 +89,15 @@ def fetch_events(url, start, end):
         if str(event.get("STATUS", "")).upper() == "CANCELLED":
             continue
         begins = _as_utc(event.get("DTSTART").dt) if event.get("DTSTART") else None
-        link = meeting_link(event)
-        if not begins or not link or not isinstance(event.get("DTSTART").dt, datetime):
+        if not begins:
             continue
         events.append(
             {
-                "key": f"{event.get('UID', link)}|{begins.isoformat()}",
+                "key": f"{event.get('UID', 'event')}|{begins.isoformat()}",
                 "title": str(event.get("SUMMARY") or "Meeting"),
                 "start": begins,
-                "link": link,
+                "link": meeting_link(event),
+                "all_day": not isinstance(event.get("DTSTART").dt, datetime),
             }
         )
     return sorted(events, key=lambda item: item["start"])
@@ -124,6 +124,8 @@ def sync_feeds(db):
             print("Calendar sync failed for", feed.get("user_email"), "-", error)
             continue
         for event in events:
+            if not event["link"] or event.get("all_day"):
+                continue
             if not (event["start"] - JOIN_EARLY <= now <= event["start"] + JOIN_LATE):
                 continue
             row = {

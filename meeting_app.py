@@ -906,7 +906,7 @@ def agenda_section(meetings):
             + ("The bot joins meetings automatically." if agenda["feed"].get("enabled") else "Automatic joining is off.")
         )
     if not entries:
-        st.caption("No meetings with a video link in the next 7 days.")
+        st.caption("Nothing in your calendar for the next 7 days.")
         return
     with st.container(border=True, key="calendar_agenda", height=440):
         for day in sorted(entries):
@@ -921,7 +921,7 @@ def agenda_section(meetings):
                     st.caption(day_label(day))
                 for start, event, meeting in sorted(entries[day], key=lambda entry: entry[0]):
                     time_col, title_col, action_col = st.columns([1, 5, 2], vertical_alignment="center")
-                    time_col.markdown(f"**{start.astimezone().strftime('%H:%M')}**")
+                    time_col.markdown("**All day**" if (event or {}).get("all_day") else f"**{start.astimezone().strftime('%H:%M')}**")
                     entry_key = (event or {}).get("key") or meeting["id"]
                     if meeting:
                         label = (event or {}).get("title") or meeting_title(meeting)
@@ -931,9 +931,16 @@ def agenda_section(meetings):
                             open_meeting(meeting["id"])
                         action_col.caption("notes ready")
                     else:
-                        title_col.markdown(f":material/event: {event['title']}")
-                        if event["start"] + timedelta(hours=1) > now and action_col.button(
-                            "Send bot", key=f"cal_bot_{entry_key}", type="tertiary", icon=":material/smart_toy:"
+                        title_col.markdown(
+                            f":material/event: {event['title']}" + ("" if event["link"] else " · no video link")
+                        )
+                        if (
+                            event["link"]
+                            and not event.get("all_day")
+                            and event["start"] + timedelta(hours=1) > now
+                            and action_col.button(
+                                "Send bot", key=f"cal_bot_{entry_key}", type="tertiary", icon=":material/smart_toy:"
+                            )
                         ):
                             try:
                                 st.session_state["active_bot_id"] = meeting_bot.join_meeting(
@@ -1720,7 +1727,8 @@ def calendar_settings_section():
                 st.warning(f"Could not read your calendar: {error}")
                 upcoming = None
             if upcoming is not None:
-                st.markdown(f"**Next 7 days: {len(upcoming)} meeting(s) with a video link**")
+                with_link = sum(1 for event in upcoming if event["link"])
+                st.markdown(f"**Next 7 days: {len(upcoming)} event(s), {with_link} with a video link the bot can join**")
                 for event in upcoming[:8]:
                     st.caption(f"{event['start'].astimezone().strftime('%a %d %b, %H:%M')} · {event['title']}")
             if st.button("Disconnect calendar", icon=":material/link_off:", key="calendar_disconnect"):

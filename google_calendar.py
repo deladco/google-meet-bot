@@ -118,19 +118,24 @@ def fetch_events(refresh_token, start, end, link_finder):
         raise ValueError(f"Google Calendar returned an error ({response.status_code}).")
     events = []
     for item in response.json().get("items", []):
+        if item.get("status") == "cancelled":
+            continue
         begins = (item.get("start") or {}).get("dateTime")
-        if item.get("status") == "cancelled" or not begins:
-            continue
-        link = link_finder(_links_text(item))
-        if not link:
-            continue
-        when = datetime.fromisoformat(begins).astimezone(timezone.utc)
+        all_day = not begins
+        if all_day:
+            day = (item.get("start") or {}).get("date")
+            if not day:
+                continue
+            when = datetime.fromisoformat(day).astimezone().astimezone(timezone.utc)
+        else:
+            when = datetime.fromisoformat(begins).astimezone(timezone.utc)
         events.append(
             {
                 "key": f"{item.get('id')}|{when.isoformat()}",
                 "title": item.get("summary") or "Meeting",
                 "start": when,
-                "link": link,
+                "link": link_finder(_links_text(item)),
+                "all_day": all_day,
             }
         )
     return events
