@@ -39,15 +39,20 @@ def normalize_feed_url(url):
 
 
 def _download(url):
-    with httpx.stream("GET", url, timeout=20, follow_redirects=False) as response:
-        if response.status_code != 200:
-            raise ValueError(f"The calendar link returned an error ({response.status_code}).")
-        data = bytearray()
-        for chunk in response.iter_bytes():
-            data.extend(chunk)
-            if len(data) > MAX_FEED_BYTES:
-                raise ValueError("The calendar feed is too large.")
-    return bytes(data)
+    for _ in range(4):
+        with httpx.stream("GET", url, timeout=20, follow_redirects=False) as response:
+            if response.status_code in (301, 302, 303, 307, 308):
+                url = normalize_feed_url(str(response.url.join(response.headers.get("location", ""))))
+                continue
+            if response.status_code != 200:
+                raise ValueError(f"The calendar link returned an error ({response.status_code}).")
+            data = bytearray()
+            for chunk in response.iter_bytes():
+                data.extend(chunk)
+                if len(data) > MAX_FEED_BYTES:
+                    raise ValueError("The calendar feed is too large.")
+            return bytes(data)
+    raise ValueError("The calendar link redirected too many times.")
 
 
 def meeting_link(event):
