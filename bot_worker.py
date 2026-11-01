@@ -54,6 +54,14 @@ ENDED_TEXTS = (
     "You were removed",
     "removed from this meeting",
     "Return to home screen",
+    "Webinar has ended",
+    "Webinar ended",
+    "Broadcast has ended",
+    "Вебинар завершен",
+    "Вебинар закончен",
+    "Трансляция завершена",
+    "Вебінар завершено",
+    "Трансляцію завершено",
 )
 
 
@@ -191,6 +199,8 @@ def join(page, url, name):
         page.wait_for_timeout(4000)
         _click_first(page, ["Continue on this browser", "Join on the web instead"], 6000)
         page.wait_for_timeout(3000)
+    if platform == "webinar":
+        return join_webinar(page, name)
     # Fill the name as soon as the box exists, then again after the page settles.
     _fill_name(page, name)
     # No camera or microphone for the bot.
@@ -210,8 +220,42 @@ def join(page, url, name):
     return True
 
 
-def in_meeting(page):
+WEBINAR_JOIN = [
+    "Join webinar", "Join", "Enter webinar", "Enter", "Watch", "Continue",
+    "Войти", "Присоединиться", "Перейти в вебинар", "Смотреть", "Продолжить",
+    "Увійти", "Приєднатися", "Дивитися", "Продовжити",
+]
+WEBINAR_PLAY = ["Play", "Unmute", "Включить звук", "Воспроизвести", "Смотреть", "Увімкнути звук", "Відтворити"]
+
+
+def join_webinar(page, name):
+    """Webinar viewers have no lobby: open the page, give a name if asked, press Join, then start playback."""
+    page.wait_for_timeout(4000)
+    _fill_name(page, name)
+    page.wait_for_timeout(500)
+    _click_first(page, WEBINAR_JOIN, 2500)
+    page.wait_for_timeout(4000)
+    _click_first(page, WEBINAR_PLAY, 1500)
+    return True
+
+
+def webinar_live(page):
+    """True once a player is on the page and no name/join form is left."""
+    try:
+        has_player = page.evaluate(
+            "() => !!document.querySelector('video, audio') || "
+            "[...document.querySelectorAll('iframe')].some(f => /youtube|vimeo|rutube|player|stream|live|wss|vk\\.com|twitch/i.test(f.src))"
+        )
+        form_open = page.locator("input[type=text]:visible, input[type=email]:visible").count() > 0
+    except Exception:
+        return False
+    return has_player and not form_open
+
+
+def in_meeting(page, platform="meet"):
     """True once the bot is admitted: a leave control is visible and the lobby/join screens are gone."""
+    if platform == "webinar":
+        return webinar_live(page)
     if in_lobby(page):
         return False
     for label in ("Ask to join", "Join now", "Join"):
@@ -245,7 +289,10 @@ DENIED_TEXTS = (
     "No one responded to your request",
     "denied your request",
 )
-LOBBY_TEXTS = ("Asking to be let in", "Someone will let you in", "Waiting for the host", "waiting room")
+LOBBY_TEXTS = (
+    "Asking to be let in", "Someone will let you in", "Waiting for the host", "waiting room",
+    "Webinar starts", "starts in", "Вебинар начнется", "Трансляция начнется", "Вебінар розпочнеться",
+)
 STATE_FILE = Path(os.environ.get("BOT_STATE_FILE") or PROJECT_DIR / "bot_google_state.json")
 CHANNEL = os.environ.get("BOT_BROWSER_CHANNEL") or None
 
@@ -294,6 +341,7 @@ def record_meeting(db, job, wav_path):
     from playwright.sync_api import sync_playwright
 
     recorder = Recorder(wav_path)
+    platform = meeting_bot.platform_of(job["meeting_url"])
     captions = None
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(
@@ -322,7 +370,7 @@ def record_meeting(db, job, wav_path):
                     message="Could not press Join automatically - sign in / join manually in the bot's browser window",
                 )
                 last_message = "manual"
-            while not in_meeting(page):
+            while not in_meeting(page, platform):
                 reason = denied_reason(page)
                 if reason:
                     raise RuntimeError(reason)

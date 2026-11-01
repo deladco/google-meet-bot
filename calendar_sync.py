@@ -19,7 +19,7 @@ MAX_FEED_BYTES = 5_000_000
 JOIN_EARLY = timedelta(minutes=2)
 JOIN_LATE = timedelta(minutes=10)
 LINK_PATTERN = re.compile(
-    r"(?:https?://)?(?:[\w-]+\.)*(?:meet\.google\.com|zoom\.us|zoom\.com|teams\.microsoft\.com|teams\.live\.com)"
+    r"(?:https?://)?(?:[\w-]+\.)*(?:meet\.google\.com|zoom\.us|zoom\.com|teams\.microsoft\.com|teams\.live\.com|webinar-stars\.com)"
     r"/[^\s<>\"')\\]+",
     re.IGNORECASE,
 )

@@ -10,6 +10,7 @@ SUPPORTED_HOSTS = (
     "zoom.com",
     "teams.microsoft.com",
     "teams.live.com",
+    "webinar-stars.com",
 )
 FINISHED = {"done"}
 FAILED = {"failed", "cancelled"}
@@ -39,6 +40,8 @@ def platform_of(url):
         return "meet"
     if host.endswith("zoom.us") or host.endswith("zoom.com"):
         return "zoom"
+    if host.endswith("webinar-stars.com"):
+        return "webinar"
     return "teams"
 
 
@@ -48,7 +51,7 @@ def validate_meeting_url(url):
         raise ValueError("Enter the full meeting link starting with https://")
     host = (urlparse(url).hostname or "").lower()
     if not any(host == h or host.endswith("." + h) for h in SUPPORTED_HOSTS):
-        raise ValueError("Only Google Meet, Zoom and Microsoft Teams links are supported.")
+        raise ValueError("Only Google Meet, Zoom, Microsoft Teams and Webinar Stars links are supported.")
     return url
 
 

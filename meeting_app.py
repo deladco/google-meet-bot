@@ -545,7 +545,7 @@ def new_meeting_section():
     if bot_mode:
         bot_url = st.text_input(
             "Meeting link",
-            placeholder="Paste your Google Meet, Zoom or Teams link",
+            placeholder="Paste your Google Meet, Zoom, Teams or webinar link",
             key="bot_meeting_link",
             label_visibility="collapsed",
         )
@@ -594,10 +594,10 @@ def new_meeting_section():
         with st.expander("Bot options"):
             bot_name = st.text_input("Bot name", value="AI Assistant")
         link_ok = bot_url.lower().startswith(("http://", "https://")) and any(
-            host in bot_url.lower() for host in ("meet.google.", "zoom.", "teams.")
+            host in bot_url.lower() for host in ("meet.google.", "zoom.", "teams.", "webinar-stars.com")
         )
         if bot_url and not link_ok:
-            st.warning("That doesn't look like a Google Meet, Zoom or Teams link.")
+            st.warning("That doesn't look like a Google Meet, Zoom, Teams or Webinar Stars link.")
         if not bot_url:
             st.caption("Paste a meeting link above to enable this button.")
         if st.button(
@@ -611,7 +611,7 @@ def new_meeting_section():
             if not consent_confirmed:
                 st.error("Tick the consent box above first, so everyone in the meeting is covered.")
             elif not link_ok:
-                st.error("Paste a full Google Meet, Zoom or Teams link first.")
+                st.error("Paste a full Google Meet, Zoom, Teams or Webinar Stars link first.")
             else:
                 try:
                     st.session_state["active_bot_id"] = meeting_bot.join_meeting(
