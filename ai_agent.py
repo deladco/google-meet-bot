@@ -1,6 +1,7 @@
 import argparse
 import json
 import re
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -197,25 +198,43 @@ def analyze_meeting(transcript_path=DEFAULT_TRANSCRIPT_FILE):
 			"record more audio before analyzing."
 		)
 
-	response = get_ollama_client().chat(
-		model=MODEL,
-		format="json",
-		think=False,
-		options={"temperature": 0},
-		messages=[
-			{
-				"role": "system",
-				"content": (
-					f"{MINUTES_RESPONSE_CONTRACT} Every topic, decision, action, "
-					"question, and summary must cite relevant segment_indices from the "
-					"provided transcript. Never invent or infer owners, deadlines, "
-					"decisions, or facts. Use 'Not specified' when an owner or deadline "
-					"is not explicit. Return empty arrays when there is no evidence."
-				)
-			},
-			{"role": "user", "content": conversation}
-		]
-	)
+	messages = [
+		{
+			"role": "system",
+			"content": (
+				f"{MINUTES_RESPONSE_CONTRACT} Every topic, decision, action, "
+				"question, and summary must cite relevant segment_indices from the "
+				"provided transcript. Never invent or infer owners, deadlines, "
+				"decisions, or facts. Use 'Not specified' when an owner or deadline "
+				"is not explicit. Return empty arrays when there is no evidence."
+			)
+		},
+		{"role": "user", "content": conversation}
+	]
+	response = None
+	for attempt in range(4):
+		try:
+			response = get_ollama_client().chat(
+				model=MODEL,
+				format="json",
+				think=False,
+				options={"temperature": 0},
+				messages=messages,
+			)
+			break
+		except Exception as error:
+			status = getattr(error, "status_code", None)
+			transient = status in (429, 500, 502, 503, 504) or isinstance(
+				error, (ConnectionError, TimeoutError)
+			)
+			if not transient or attempt == 3:
+				if transient:
+					raise RuntimeError(
+						f"The AI service is temporarily unavailable (error {status or 'connection'}). "
+						"Your transcript is saved; try again in a minute."
+					) from error
+				raise
+			time.sleep(3 * 2**attempt)
 
 	minutes = _parse_minutes_response(response)
 	minutes["summary_refs"] = _references(minutes.get("summary_refs", []), entries)
