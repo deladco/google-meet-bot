@@ -1553,6 +1553,11 @@ def calendar_settings_section():
                     icon=":material/event:",
                 )
                 st.caption("Read-only access. After approving, sign in again if asked and you'll land back here.")
+                with st.expander("Connection details (for troubleshooting)"):
+                    st.write("Redirect URI sent to Google (must be listed exactly in the OAuth client):")
+                    st.code(google_calendar.redirect_uri(), language=None)
+                    st.write("Client ID in use:")
+                    st.code(google_calendar.client_id(), language=None)
         with st.expander("Or use a calendar link (iCal)", expanded=bool(feed) and not google_connected):
             st.caption(
                 "Paste a secret iCal link: Google Calendar > Settings > your calendar > Integrate calendar > "
