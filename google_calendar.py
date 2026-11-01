@@ -29,7 +29,7 @@ def client_secret():
 
 
 def redirect_uri():
-    return (get_setting("GOOGLE_REDIRECT_URI") or "https://meet-ai.streamlit.app").strip()
+    return (get_setting("GOOGLE_REDIRECT_URI") or "https://ai-chief.streamlit.app").strip()
 
 
 def is_configured():
