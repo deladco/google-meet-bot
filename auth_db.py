@@ -1,10 +1,25 @@
+import base64
+import json
+import threading
+import time
+
 import streamlit as st
 from supabase import Client, create_client as _create_client
 
 from remote_config import get_setting
 
 MEETINGS_TABLE = "synced_meetings"
-SESSION_KEYS = ("access_token", "refresh_token", "user_id", "supabase_user")
+SESSION_KEYS = ("access_token", "refresh_token", "user_id", "supabase_user", "_supabase_client")
+CLIENT_KEY = "_supabase_client"
+_refresh_lock = threading.Lock()
+
+
+def _expires_at(token):
+    try:
+        payload = token.split(".")[1]
+        return json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4))).get("exp", 0)
+    except Exception:
+        return 0
 
 
 def _first(*names):
@@ -45,22 +60,37 @@ def save_login(response):
 
 
 def client_for_user() -> Client:
-    """Isolated client for this Streamlit session, with a validated, refreshed token."""
+    """Client for this Streamlit session. Reused until the token nears expiry, because
+    Supabase refresh tokens are single-use and concurrent reruns must not spend the same one twice."""
     token = st.session_state.get("access_token")
     refresh = st.session_state.get("refresh_token")
     if not token or not refresh:
         raise PermissionError("Not signed in")
 
-    db = new_client()
-    session = db.auth.set_session(token, refresh)
-    user = db.auth.get_user(session.session.access_token).user
-    if user is None:
-        raise PermissionError("Invalid session")
+    cached = st.session_state.get(CLIENT_KEY)
+    if cached and cached["token"] == token and _expires_at(token) - time.time() > 60:
+        return cached["db"]
 
-    st.session_state.access_token = session.session.access_token
-    st.session_state.refresh_token = session.session.refresh_token
-    st.session_state.user_id = user.id
-    return db
+    with _refresh_lock:
+        # Another rerun may have refreshed while we waited; use its result.
+        token = st.session_state.get("access_token")
+        refresh = st.session_state.get("refresh_token")
+        cached = st.session_state.get(CLIENT_KEY)
+        if cached and cached["token"] == token and _expires_at(token) - time.time() > 60:
+            return cached["db"]
+        db = new_client()
+        try:
+            session = db.auth.set_session(token, refresh)
+            user = db.auth.get_user(session.session.access_token).user
+        except Exception as error:
+            raise PermissionError(f"Session expired, please sign in again ({error})") from error
+        if user is None:
+            raise PermissionError("Invalid session")
+        st.session_state.access_token = session.session.access_token
+        st.session_state.refresh_token = session.session.refresh_token
+        st.session_state.user_id = user.id
+        st.session_state[CLIENT_KEY] = {"token": session.session.access_token, "db": db}
+        return db
 
 
 def sign_in(client, email, password):
