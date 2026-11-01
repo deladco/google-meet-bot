@@ -221,17 +221,54 @@ def join(page, url, name):
 
 
 WEBINAR_JOIN = [
-    "Join webinar", "Join", "Enter webinar", "Enter", "Watch", "Continue",
+    "Приєднатись до вебінару", "Приєднатись", "Join webinar", "Join", "Enter webinar", "Enter", "Watch", "Continue",
     "Войти", "Присоединиться", "Перейти в вебинар", "Смотреть", "Продолжить",
     "Увійти", "Приєднатися", "Дивитися", "Продовжити",
 ]
 WEBINAR_PLAY = ["Play", "Unmute", "Включить звук", "Воспроизвести", "Смотреть", "Увімкнути звук", "Відтворити"]
 
 
+def _fill_webinar_form(page, name):
+    """Webinar Stars asks for name, email, phone and nickname before letting anyone in."""
+    email = os.environ.get("WEBINAR_EMAIL", "meeting.bot@example.com")
+    phone = os.environ.get("WEBINAR_PHONE", "501234567")
+    boxes = page.locator("input:visible")
+    for i in range(boxes.count()):
+        box = boxes.nth(i)
+        try:
+            kind = (box.get_attribute("type") or "text").lower()
+            if kind in ("checkbox", "radio", "hidden", "submit", "button"):
+                continue
+            hint = " ".join(
+                (box.get_attribute(a) or "") for a in ("name", "id", "placeholder", "autocomplete")
+            ).lower()
+            label = ""
+            try:
+                label = box.evaluate("e => (e.closest('div')?.parentElement?.innerText || '').toLowerCase()")
+            except Exception:
+                pass
+            text = hint + " " + label
+            if kind == "email" or "mail" in text:
+                value = email
+            elif kind == "tel" or "phone" in text or "телефон" in text or "xx xxx" in text:
+                value = phone
+            else:
+                value = name
+            if not box.input_value():
+                box.fill(value, timeout=2000)
+        except Exception:
+            continue
+    for box in page.locator("input[type=checkbox]:visible").all():
+        try:
+            box.check(timeout=1000)
+        except Exception:
+            pass
+
+
 def join_webinar(page, name):
-    """Webinar viewers have no lobby: open the page, give a name if asked, press Join, then start playback."""
+    """Webinar viewers have no lobby: open the page, register, press Join, then start playback."""
     page.wait_for_timeout(4000)
-    _fill_name(page, name)
+    _fill_webinar_form(page, name)
     page.wait_for_timeout(500)
     _click_first(page, WEBINAR_JOIN, 2500)
     page.wait_for_timeout(4000)
