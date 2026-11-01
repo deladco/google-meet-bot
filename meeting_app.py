@@ -1633,7 +1633,7 @@ def handle_google_callback():
         st.session_state["calendar_notice"] = ("success", "Google Calendar connected.")
     except Exception as error:
         st.session_state["calendar_notice"] = ("error", f"Could not connect Google Calendar: {error}")
-    st.switch_page(PAGE_SETTINGS)
+    st.switch_page(PAGE_CALENDAR)
 
 
 def calendar_settings_section():
@@ -1728,6 +1728,12 @@ def calendar_settings_section():
                 st.rerun()
 
 
+def calendar_page():
+    st.title("Calendar")
+    agenda_section(load_meetings())
+    calendar_settings_section()
+
+
 def settings_page():
     st.title("Settings")
 
@@ -1748,8 +1754,6 @@ def settings_page():
             auth_db.sign_out()
             st.session_state.pop("authenticated", None)
             st.rerun()
-
-    calendar_settings_section()
 
     st.subheader("Transcription")
     with st.container(border=True):
@@ -1819,13 +1823,14 @@ PAGE_DASHBOARD = st.Page(dashboard_page, title="Dashboard", icon=":material/dash
 PAGE_MEETINGS = st.Page(meetings_page, title="My Meetings", icon=":material/event_note:", url_path="meetings")
 PAGE_CHAT = st.Page(chat_page, title="Ask AI", icon=":material/chat:", url_path="chat")
 PAGE_ACTIONS = st.Page(actions_page, title="Task board", icon=":material/task_alt:", url_path="actions")
+PAGE_CALENDAR = st.Page(calendar_page, title="Calendar", icon=":material/calendar_month:", url_path="calendar")
 PAGE_SETTINGS = st.Page(settings_page, title="Settings", icon=":material/settings:", url_path="settings")
 
 THEME_CSS = (PROJECT_DIR / "assets" / "theme.css").read_text(encoding="utf-8")
 st.markdown(f"<style>{THEME_CSS}</style>", unsafe_allow_html=True)
 
 st.logo(str(LOGO_FILE), size="large")
-navigation = st.navigation([PAGE_DASHBOARD, PAGE_MEETINGS, PAGE_CHAT, PAGE_ACTIONS, PAGE_SETTINGS], position="top")
+navigation = st.navigation([PAGE_DASHBOARD, PAGE_MEETINGS, PAGE_CALENDAR, PAGE_CHAT, PAGE_ACTIONS, PAGE_SETTINGS], position="top")
 handle_google_callback()
 navigation.run()
 st.divider()
