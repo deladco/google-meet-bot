@@ -206,7 +206,7 @@ hr { border: none !important; height: 2px; background: rgba(156,195,234,.18) !im
   transition: transform .15s ease, border-color .15s ease;
 }
 .st-key-metric_meetings button:hover, .st-key-metric_actions button:hover, .st-key-metric_hours button:hover {
-  transform: translateY(-2px); border-color: #FF7A1A; color: #E8EEF7;
+  transform: translateY(-2px); border-color: #FF9140; color: #E8EEF7; box-shadow: 6px 6px 14px rgba(5,10,20,.55), 0 0 16px rgba(255,122,26,.55);
 }
 .st-key-metric_meetings button [data-testid="stMarkdownContainer"],
 .st-key-metric_actions button [data-testid="stMarkdownContainer"],
