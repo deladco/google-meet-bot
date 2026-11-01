@@ -934,6 +934,8 @@ def agenda_section(meetings):
                         title_col.markdown(
                             f":material/event: {event['title']}" + ("" if event["link"] else " · no video link")
                         )
+                        if not event["link"] and event.get("where"):
+                            title_col.caption(f"Location/description: {event['where']}")
                         if (
                             event["link"]
                             and not event.get("all_day")

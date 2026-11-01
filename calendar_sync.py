@@ -3,11 +3,12 @@
 Works with any calendar that offers a private iCal (.ics) link: Google Calendar, Outlook, Apple.
 The app stores the link in `calendar_feeds`; bot_worker.py calls `sync_feeds` about once a minute.
 """
+import html
 import ipaddress
 import re
 import socket
 from datetime import date, datetime, timedelta, timezone
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 import httpx
 
@@ -17,7 +18,11 @@ FEEDS_TABLE = "calendar_feeds"
 MAX_FEED_BYTES = 5_000_000
 JOIN_EARLY = timedelta(minutes=2)
 JOIN_LATE = timedelta(minutes=10)
-LINK_PATTERN = re.compile(r"https://[^\s<>\"')\\]+")
+LINK_PATTERN = re.compile(
+    r"(?:https?://)?(?:[\w-]+\.)*(?:meet\.google\.com|zoom\.us|zoom\.com|teams\.microsoft\.com|teams\.live\.com)"
+    r"/[^\s<>\"')\\]+",
+    re.IGNORECASE,
+)
 
 
 def normalize_feed_url(url):
@@ -56,11 +61,15 @@ def _download(url):
 
 
 def find_link(texts):
-    """First supported meeting link found in any of the given strings."""
+    """First supported meeting link found in any of the given strings (tolerates HTML, wrapped and scheme-less links)."""
     for text in texts:
-        for candidate in LINK_PATTERN.findall(str(text or "")):
+        text = unquote(html.unescape(str(text or "")))
+        for candidate in LINK_PATTERN.findall(text):
+            candidate = candidate.rstrip(".,;")
+            if not candidate.lower().startswith("http"):
+                candidate = "https://" + candidate
             try:
-                return meeting_bot.validate_meeting_url(candidate.rstrip(".,;"))
+                return meeting_bot.validate_meeting_url(candidate)
             except ValueError:
                 continue
     return None

@@ -111,6 +111,7 @@ def fetch_events(refresh_token, start, end, link_finder):
             "singleEvents": "true",
             "orderBy": "startTime",
             "maxResults": 100,
+            "conferenceDataVersion": 1,
         },
         timeout=20,
     )
@@ -136,6 +137,9 @@ def fetch_events(refresh_token, start, end, link_finder):
                 "start": when,
                 "link": link_finder(_links_text(item)),
                 "all_day": all_day,
+                "where": " | ".join(
+                    str(value)[:160] for value in (item.get("location"), item.get("description")) if value
+                ),
             }
         )
     return events
