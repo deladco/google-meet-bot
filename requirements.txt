@@ -14,3 +14,5 @@ google-auth-httplib2>=0.4,<1
 google-api-python-client>=2.201,<3
 requests>=2.34,<3
 httpx>=0.27
+icalendar>=6,<8
+recurring-ical-events>=3,<4

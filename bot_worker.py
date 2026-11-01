@@ -28,6 +28,7 @@ PROJECT_DIR = Path(__file__).resolve().parent
 load_dotenv(dotenv_path=PROJECT_DIR / ".env")
 
 import auth_db
+import calendar_sync
 import meeting_bot
 from meeting_history import MeetingHistory
 from live_captions import LiveCaptions
@@ -36,6 +37,7 @@ from remote_workflow import process_uploaded_recording
 LIVE_CAPTIONS = os.environ.get("BOT_LIVE_CAPTIONS", "1") == "1"
 SAMPLE_RATE = 16000
 POLL_SECONDS = 10
+CALENDAR_SYNC_SECONDS = 60
 AUDIO_TABLE = "audio_jobs"
 AUDIO_BUCKET = "recordings"
 MAX_MINUTES = int(os.environ.get("BOT_MAX_MINUTES", "180"))
@@ -483,7 +485,14 @@ def poll_audio_jobs(db):
 def main():
     db = service_client()
     print(f"Bot worker running (headless={HEADLESS}). Waiting for jobs...")
+    last_calendar_sync = 0.0
     while True:
+        if time.time() - last_calendar_sync >= CALENDAR_SYNC_SECONDS:
+            last_calendar_sync = time.time()
+            try:
+                calendar_sync.sync_feeds(db)
+            except Exception as error:
+                print("Calendar sync skipped:", error)
         if poll_audio_jobs(db):
             continue
         try:

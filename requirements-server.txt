@@ -8,3 +8,5 @@ ollama>=0.6,<1
 python-dotenv>=1.2,<2
 supabase>=2,<3
 httpx>=0.27
+icalendar>=6,<8
+recurring-ical-events>=3,<4

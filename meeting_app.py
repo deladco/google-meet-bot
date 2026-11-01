@@ -12,6 +12,7 @@ import streamlit as st
 from dotenv import load_dotenv
 
 import auth_db
+import calendar_sync
 from ai_agent import load_transcript
 from remote_config import (
     CLOUD_OLLAMA_HOST,
@@ -1495,6 +1496,76 @@ def ollama_target_label(host):
     return "Custom Ollama endpoint"
 
 
+def calendar_settings_section():
+    st.subheader("Calendar auto-join")
+    with st.container(border=True):
+        if not (meeting_bot.is_configured() and st.session_state.get("supabase_user")):
+            st.caption("Sign in with Supabase to connect your calendar.")
+            return
+        client = auth_db.client_for_user()
+        try:
+            rows = client.table(calendar_sync.FEEDS_TABLE).select("*").limit(1).execute().data
+        except Exception:
+            st.info("Run supabase_migration_calendar.sql in Supabase once to enable calendar auto-join.")
+            return
+        feed = rows[0] if rows else None
+        st.caption(
+            "The bot joins your Google Meet, Zoom and Teams meetings automatically when they start. "
+            "Paste your calendar's secret iCal link: Google Calendar > Settings > your calendar > "
+            "Integrate calendar > Secret address in iCal format. Outlook and Apple Calendar offer "
+            "a similar link when you publish a calendar. Everyone in the meeting will see the bot."
+        )
+        with st.form("calendar_feed_form", border=False):
+            ics_url = st.text_input(
+                "Calendar link (iCal)",
+                value="",
+                type="password",
+                placeholder="Saved. Paste a new link to replace it" if feed else "https://calendar.google.com/calendar/ical/.../basic.ics",
+            )
+            bot_name = st.text_input("Bot name", value=(feed or {}).get("bot_name", "AI Assistant"))
+            enabled = st.toggle("Send the bot automatically", value=(feed or {}).get("enabled", True))
+            consent = st.checkbox(
+                "I have the right to record these meetings and will tell participants.",
+                value=bool(feed),
+            )
+            saved = st.form_submit_button("Save", type="primary", icon=":material/event_available:")
+        if saved:
+            try:
+                if not consent:
+                    raise ValueError("Please confirm the recording consent first.")
+                url = ics_url.strip() or (feed or {}).get("ics_url")
+                if not url:
+                    raise ValueError("Paste your calendar link first.")
+                calendar_sync.normalize_feed_url(url)
+                client.table(calendar_sync.FEEDS_TABLE).upsert(
+                    {
+                        "user_id": st.session_state.get("user_id"),
+                        "user_email": viewer_email,
+                        "ics_url": calendar_sync.normalize_feed_url(url),
+                        "bot_name": (bot_name or "AI Assistant").strip()[:100],
+                        "enabled": enabled,
+                    }
+                ).execute()
+                st.success("Calendar saved.")
+                st.rerun()
+            except Exception as error:
+                st.error(f"Could not save: {error}")
+        if feed:
+            try:
+                now = datetime.now(timezone.utc)
+                upcoming = calendar_sync.fetch_events(feed["ics_url"], now, now + timedelta(days=7))
+            except Exception as error:
+                st.warning(f"Could not read your calendar: {error}")
+                upcoming = None
+            if upcoming is not None:
+                st.markdown(f"**Next 7 days: {len(upcoming)} meeting(s) with a video link**")
+                for event in upcoming[:8]:
+                    st.caption(f"{event['start'].astimezone().strftime('%a %d %b, %H:%M')} · {event['title']}")
+            if st.button("Disconnect calendar", icon=":material/link_off:", key="calendar_disconnect"):
+                client.table(calendar_sync.FEEDS_TABLE).delete().eq("user_id", feed["user_id"]).execute()
+                st.rerun()
+
+
 def settings_page():
     st.title("Settings")
 
@@ -1515,6 +1586,8 @@ def settings_page():
             auth_db.sign_out()
             st.session_state.pop("authenticated", None)
             st.rerun()
+
+    calendar_settings_section()
 
     st.subheader("Transcription")
     with st.container(border=True):
