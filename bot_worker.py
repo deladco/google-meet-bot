@@ -13,6 +13,7 @@ PulseAudio and ffmpeg (see Dockerfile.worker).
 """
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
