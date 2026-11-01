@@ -347,7 +347,19 @@ def process_uploaded_recording(
 
         step("Writing the summary and action items")
         history.update_status(session_id, "analyzing")
-        minutes = analyze_meeting(transcript_path)
+        try:
+            minutes = analyze_meeting(transcript_path)
+        except RuntimeError as error:
+            # Keep the transcript so the meeting still shows up on the dashboard.
+            message = f"{error} The transcript was saved."
+            history.update_status(session_id, "processing_failed", error=message)
+            return {
+                "status": "processing_failed",
+                "meeting_id": session_id,
+                "transcript_path": transcript_path,
+                "error": message,
+                "diarization_status": diarization_status,
+            }
         markdown = render_markdown(minutes)
         step("Saving notes")
         notes_path.write_text(markdown, encoding="utf-8")
