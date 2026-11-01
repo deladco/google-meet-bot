@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 
 import auth_db
 import calendar_sync
+import google_calendar
 from ai_agent import load_transcript
 from remote_config import (
     CLOUD_OLLAMA_HOST,
@@ -336,7 +337,7 @@ def meeting_title(meeting):
     topics = minutes_list(meeting, "discussion_topics")
     if topics and topics[0].get("topic"):
         return str(topics[0]["topic"])
-    return f"Meeting · {when_full(meeting['recorded_at'])}"
+    return f"Meeting Â· {when_full(meeting['recorded_at'])}"
 
 
 def meeting_duration_hours(meeting):
@@ -427,7 +428,7 @@ def show_processing_result(result):
     if result["status"] == "completed":
         st.success(f"Meeting processed: {result['meeting_id']}")
         st.caption(
-            f"{result['action_item_count']} action items · "
+            f"{result['action_item_count']} action items Â· "
             f"Speaker identification: {result['diarization_status'].replace('unavailable', 'not available')}"
         )
         notes_path = Path(result["notes_path"])
@@ -554,7 +555,7 @@ def new_meeting_section():
 
     if audio_source == "Browser microphone":
         st.caption(
-            "Use the recorder’s Start/Stop controls. This captures your browser microphone, "
+            "Use the recorderâ€™s Start/Stop controls. This captures your browser microphone, "
             "not Meet tab or system audio."
         )
         if not consent_confirmed:
@@ -692,8 +693,8 @@ def show_sources(passages):
     with st.expander(f"Sources ({len(passages)})"):
         for number, passage in enumerate(passages, start=1):
             st.markdown(
-                f"**[{number}]** `{passage['meeting_id']}` · "
-                f"{str(passage.get('recorded_at') or '')[:16]} · {passage['kind']}"
+                f"**[{number}]** `{passage['meeting_id']}` Â· "
+                f"{str(passage.get('recorded_at') or '')[:16]} Â· {passage['kind']}"
             )
             st.text(passage["content"][:600])
 
@@ -808,7 +809,7 @@ def projects_section(meetings):
             for column, (name, counts) in zip(columns, entries[start : start + 3]):
                 with column.container(border=True):
                     st.markdown(f"**{name}**")
-                    st.caption(f"{counts['open']} open · {counts['done']} done")
+                    st.caption(f"{counts['open']} open Â· {counts['done']} done")
                     if st.button("Open tasks", key=f"open_project_{name}", type="tertiary", icon=":material/arrow_forward:"):
                         open_task_board(name)
         add_project_form("add_project_dashboard")
@@ -923,12 +924,12 @@ def meeting_card(meeting, key_prefix, show_open=True):
                             st.rerun()
         if meeting["minutes"]:
             detail = (
-                f"{len(minutes_list(meeting, 'decisions'))} decisions · "
+                f"{len(minutes_list(meeting, 'decisions'))} decisions Â· "
                 f"{len(minutes_list(meeting, 'action_items'))} actions"
             )
         else:
             detail = status_label(meeting)
-        st.caption(f"{when_label(meeting['recorded_at'])} · {detail}")
+        st.caption(f"{when_label(meeting['recorded_at'])} Â· {detail}")
         if show_open and st.button("Open", key=f"{key_prefix}_{meeting['id']}", type="tertiary", icon=":material/arrow_forward:"):
             open_meeting(meeting["id"])
 
@@ -1037,7 +1038,7 @@ def show_minutes(meeting):
     info = minutes_store.review(minutes)
     if approved:
         st.success(
-            f"Approved{' by ' + info['approved_by'] if info.get('approved_by') else ''} · {when_full(info.get('approved_at'))}",
+            f"Approved{' by ' + info['approved_by'] if info.get('approved_by') else ''} Â· {when_full(info.get('approved_at'))}",
             icon=":material/verified:",
         )
     else:
@@ -1088,10 +1089,10 @@ def show_minutes(meeting):
                 st.markdown(f"~~{item.get('task', '')}~~" if done else f"**{item.get('task', '')}**")
                 due = minutes_store.parse_due(item.get("due"))
                 st.caption(
-                    f"Owner: {item.get('owner') or 'Not specified'} · "
+                    f"Owner: {item.get('owner') or 'Not specified'} Â· "
                     f"Deadline: {item.get('deadline') or 'Not specified'}"
-                    + (f" · Due {due.strftime('%d %b %Y')}" if due else "")
-                    + (" · Done" if done else "")
+                    + (f" Â· Due {due.strftime('%d %b %Y')}" if due else "")
+                    + (" Â· Done" if done else "")
                 )
                 sources_caption(item)
         st.page_link(PAGE_ACTIONS, label="Track these on the task board", icon=":material/checklist:")
@@ -1160,9 +1161,9 @@ def edit_minutes_form(meeting):
 def show_meeting(meeting):
     st.header(meeting_title(meeting))
     st.caption(
-        f"{when_full(meeting['recorded_at'])} · {status_label(meeting)} · "
+        f"{when_full(meeting['recorded_at'])} Â· {status_label(meeting)} Â· "
         f"{'Saved in cloud' if meeting['source'] == 'cloud' else 'This server only'}"
-        + (f" · Recorded by {meeting['owner_email']}" if viewer_sees_all and meeting["owner_email"] else "")
+        + (f" Â· Recorded by {meeting['owner_email']}" if viewer_sees_all and meeting["owner_email"] else "")
     )
     if meeting["error"]:
         st.warning(meeting["error"])
@@ -1323,7 +1324,7 @@ def due_label(row, today):
         return "No due date"
     text = row["due"].strftime("%d %b")
     if bucket == "overdue":
-        return f":red[Overdue · {text}]"
+        return f":red[Overdue Â· {text}]"
     if bucket == "today":
         return ":orange[Due today]"
     return f"Due {text}"
@@ -1342,8 +1343,8 @@ def task_card(row, today, project_names):
             on_change=update_task,
             args=(meeting["id"], row["id"], f"done_{base}", "status"),
         )
-        project_tag = f"{row['project']} · " if row["project"] else ""
-        st.caption(f"{project_tag}{row['owner']} · {due_label(row, today)} · {meeting_title(meeting)}")
+        project_tag = f"{row['project']} Â· " if row["project"] else ""
+        st.caption(f"{project_tag}{row['owner']} Â· {due_label(row, today)} Â· {meeting_title(meeting)}")
         options = [NO_PROJECT, *project_names]
         project_key = f"project_{base}_{row['project']}"
         st.selectbox(
@@ -1496,6 +1497,31 @@ def ollama_target_label(host):
     return "Custom Ollama endpoint"
 
 
+def handle_google_callback():
+    """Finishes Google sign-in when Google sends the user back with ?code=...&state=..."""
+    code, state = st.query_params.get("code"), st.query_params.get("state")
+    if not (code and state and google_calendar.is_configured() and st.session_state.get("supabase_user")):
+        return
+    user_id = st.session_state.get("user_id")
+    st.query_params.clear()
+    try:
+        if not google_calendar.state_belongs_to(state, user_id):
+            raise ValueError("The sign-in request expired or belongs to another account. Try again.")
+        refresh_token = google_calendar.exchange_code(code)
+        auth_db.client_for_user().table(calendar_sync.FEEDS_TABLE).upsert(
+            {
+                "user_id": user_id,
+                "user_email": viewer_email,
+                "google_refresh_token": refresh_token,
+                "enabled": True,
+            }
+        ).execute()
+        st.session_state["calendar_notice"] = ("success", "Google Calendar connected.")
+    except Exception as error:
+        st.session_state["calendar_notice"] = ("error", f"Could not connect Google Calendar: {error}")
+    st.switch_page(PAGE_SETTINGS)
+
+
 def calendar_settings_section():
     st.subheader("Calendar auto-join")
     with st.container(border=True):
@@ -1509,19 +1535,37 @@ def calendar_settings_section():
             st.info("Run supabase_migration_calendar.sql in Supabase once to enable calendar auto-join.")
             return
         feed = rows[0] if rows else None
+        notice = st.session_state.pop("calendar_notice", None)
+        if notice:
+            getattr(st, notice[0])(notice[1])
         st.caption(
             "The bot joins your Google Meet, Zoom and Teams meetings automatically when they start. "
-            "Paste your calendar's secret iCal link: Google Calendar > Settings > your calendar > "
-            "Integrate calendar > Secret address in iCal format. Outlook and Apple Calendar offer "
-            "a similar link when you publish a calendar. Everyone in the meeting will see the bot."
+            "Everyone in the meeting will see the bot."
         )
-        with st.form("calendar_feed_form", border=False):
+        google_connected = bool(feed and feed.get("google_refresh_token"))
+        if google_calendar.is_configured():
+            if google_connected:
+                st.success("Google Calendar is connected.", icon=":material/check_circle:")
+            else:
+                st.link_button(
+                    "Connect Google Calendar",
+                    google_calendar.authorization_url(st.session_state.get("user_id")),
+                    icon=":material/event:",
+                )
+                st.caption("Read-only access. After approving, sign in again if asked and you'll land back here.")
+        with st.expander("Or use a calendar link (iCal)", expanded=bool(feed) and not google_connected):
+            st.caption(
+                "Paste a secret iCal link: Google Calendar > Settings > your calendar > Integrate calendar > "
+                "Secret address in iCal format. Outlook and Apple Calendar give a similar link when you publish a calendar."
+            )
             ics_url = st.text_input(
                 "Calendar link (iCal)",
                 value="",
                 type="password",
-                placeholder="Saved. Paste a new link to replace it" if feed else "https://calendar.google.com/calendar/ical/.../basic.ics",
+                key="calendar_ics_input",
+                placeholder="Saved. Paste a new link to replace it" if (feed or {}).get("ics_url") else "https://.../basic.ics",
             )
+        with st.form("calendar_feed_form", border=False):
             bot_name = st.text_input("Bot name", value=(feed or {}).get("bot_name", "AI Assistant"))
             enabled = st.toggle("Send the bot automatically", value=(feed or {}).get("enabled", True))
             consent = st.checkbox(
@@ -1533,27 +1577,26 @@ def calendar_settings_section():
             try:
                 if not consent:
                     raise ValueError("Please confirm the recording consent first.")
-                url = ics_url.strip() or (feed or {}).get("ics_url")
-                if not url:
-                    raise ValueError("Paste your calendar link first.")
-                calendar_sync.normalize_feed_url(url)
-                client.table(calendar_sync.FEEDS_TABLE).upsert(
-                    {
-                        "user_id": st.session_state.get("user_id"),
-                        "user_email": viewer_email,
-                        "ics_url": calendar_sync.normalize_feed_url(url),
-                        "bot_name": (bot_name or "AI Assistant").strip()[:100],
-                        "enabled": enabled,
-                    }
-                ).execute()
+                row = {
+                    "user_id": st.session_state.get("user_id"),
+                    "user_email": viewer_email,
+                    "bot_name": (bot_name or "AI Assistant").strip()[:100],
+                    "enabled": enabled,
+                }
+                url = ics_url.strip()
+                if url:
+                    row["ics_url"] = calendar_sync.normalize_feed_url(url)
+                elif not feed or not (feed.get("ics_url") or google_connected):
+                    raise ValueError("Connect Google Calendar or paste a calendar link first.")
+                client.table(calendar_sync.FEEDS_TABLE).upsert(row).execute()
                 st.success("Calendar saved.")
                 st.rerun()
             except Exception as error:
                 st.error(f"Could not save: {error}")
-        if feed:
+        if feed and (google_connected or feed.get("ics_url")):
             try:
                 now = datetime.now(timezone.utc)
-                upcoming = calendar_sync.fetch_events(feed["ics_url"], now, now + timedelta(days=7))
+                upcoming = calendar_sync.feed_events(feed, now, now + timedelta(days=7))
             except Exception as error:
                 st.warning(f"Could not read your calendar: {error}")
                 upcoming = None
@@ -1599,9 +1642,9 @@ def settings_page():
             "Pick one language only if the meeting is entirely in it. The AI bot uses WHISPER_LANGUAGE on its host.",
         )
         st.caption(
-            f"Model: {os.getenv('WHISPER_MODEL') or 'automatic (large-v3-turbo on GPU, small on CPU)'} · "
-            f"Audio cleanup: {'off' if os.getenv('AUDIO_CLEANUP') == '0' else 'on'} · "
-            f"Spelling correction: {'off' if os.getenv('TRANSCRIPT_LLM_CORRECTION') == '0' else 'on'} · "
+            f"Model: {os.getenv('WHISPER_MODEL') or 'automatic (large-v3-turbo on GPU, small on CPU)'} Â· "
+            f"Audio cleanup: {'off' if os.getenv('AUDIO_CLEANUP') == '0' else 'on'} Â· "
+            f"Spelling correction: {'off' if os.getenv('TRANSCRIPT_LLM_CORRECTION') == '0' else 'on'} Â· "
             f"Vocabulary learning: {'off' if os.getenv('VOCABULARY_LEARNING') == '0' else 'on'}"
         )
 
@@ -1628,7 +1671,7 @@ def settings_page():
         ollama_host = get_ollama_host()
         api_key_configured = bool(get_setting("OLLAMA_API_KEY"))
         st.caption(
-            f"Endpoint: {ollama_target_label(ollama_host)} · "
+            f"Endpoint: {ollama_target_label(ollama_host)} Â· "
             f"API key: {'configured' if api_key_configured else 'missing'}"
         )
         if st.button("Test connection", disabled=not api_key_configured, key="test_ollama_connection"):
@@ -1664,9 +1707,10 @@ st.markdown(f"<style>{THEME_CSS}</style>", unsafe_allow_html=True)
 
 st.logo(str(LOGO_FILE), size="large")
 navigation = st.navigation([PAGE_DASHBOARD, PAGE_MEETINGS, PAGE_CHAT, PAGE_ACTIONS, PAGE_SETTINGS], position="top")
+handle_google_callback()
 navigation.run()
 st.divider()
-footer = "Created by Daryna Ladanovska · Version 1.1"
+footer = "Created by Daryna Ladanovska Â· Version 1.1"
 if st.session_state.get("supabase_user"):
-    footer = f"Signed in as {st.session_state['supabase_user']} · {footer}"
+    footer = f"Signed in as {st.session_state['supabase_user']} Â· {footer}"
 st.caption(footer)

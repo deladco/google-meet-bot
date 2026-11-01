@@ -55,15 +55,19 @@ def _download(url):
     raise ValueError("The calendar link redirected too many times.")
 
 
-def meeting_link(event):
-    for field in ("LOCATION", "URL", "X-GOOGLE-CONFERENCE", "DESCRIPTION"):
-        text = str(event.get(field) or "")
-        for candidate in LINK_PATTERN.findall(text):
+def find_link(texts):
+    """First supported meeting link found in any of the given strings."""
+    for text in texts:
+        for candidate in LINK_PATTERN.findall(str(text or "")):
             try:
                 return meeting_bot.validate_meeting_url(candidate.rstrip(".,;"))
             except ValueError:
                 continue
     return None
+
+
+def meeting_link(event):
+    return find_link(str(event.get(field) or "") for field in ("LOCATION", "URL", "X-GOOGLE-CONFERENCE", "DESCRIPTION"))
 
 
 def _as_utc(value):
@@ -99,6 +103,15 @@ def fetch_events(url, start, end):
     return sorted(events, key=lambda item: item["start"])
 
 
+def feed_events(feed, start, end):
+    """Events for a saved feed: Google Calendar when connected, otherwise the iCal link."""
+    if feed.get("google_refresh_token"):
+        import google_calendar
+
+        return google_calendar.fetch_events(feed["google_refresh_token"], start, end, find_link)
+    return fetch_events(feed["ics_url"], start, end)
+
+
 def sync_feeds(db):
     """Queue a bot for every enabled feed's meeting that is starting now. Returns jobs queued."""
     now = datetime.now(timezone.utc)
@@ -106,7 +119,7 @@ def sync_feeds(db):
     feeds = db.table(FEEDS_TABLE).select("*").eq("enabled", True).execute().data
     for feed in feeds:
         try:
-            events = fetch_events(feed["ics_url"], now - JOIN_LATE, now + JOIN_EARLY)
+            events = feed_events(feed, now - JOIN_LATE, now + JOIN_EARLY)
         except Exception as error:
             print("Calendar sync failed for", feed.get("user_email"), "-", error)
             continue
