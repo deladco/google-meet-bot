@@ -1,4 +1,4 @@
-/*
+﻿/*
   Palette: deep navy base (60%), blue surfaces + light-blue secondary (30%), orange accent (10%).
   Orange is reserved for primary actions, active states and focus; blue carries everything else.
 */
@@ -196,8 +196,21 @@ hr { border: none !important; height: 2px; background: rgba(156,195,234,.18) !im
   h1 { font-size: 1.7rem !important; }
 }
 
-/* Dashboard metric tiles are clickable: an invisible button covers the whole tile */
-.st-key-metric_meetings, .st-key-metric_actions, .st-key-metric_hours { position: relative; cursor: pointer; transition: transform .15s ease; }
-.st-key-metric_meetings:hover, .st-key-metric_actions:hover, .st-key-metric_hours:hover { transform: translateY(-2px); }
-.st-key-metric_meetings [data-testid="stButton"], .st-key-metric_actions [data-testid="stButton"], .st-key-metric_hours [data-testid="stButton"] { position: absolute; inset: 0; z-index: 2; }
-.st-key-metric_meetings [data-testid="stButton"] button, .st-key-metric_actions [data-testid="stButton"] button, .st-key-metric_hours [data-testid="stButton"] button { width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+/* Dashboard stat tiles: real buttons that open the matching page */
+.st-key-metric_meetings button, .st-key-metric_actions button, .st-key-metric_hours button {
+  display: block; height: auto; min-height: 7rem; padding: 1.1rem 1.4rem; text-align: left;
+  background: var(--surface, #16263D); color: var(--muted, #9FB3CC);
+  border: 1px solid rgba(156,195,234,.18); border-radius: 18px;
+  box-shadow: 6px 6px 14px rgba(5,10,20,.55), -4px -4px 12px rgba(63,127,200,.10);
+  transition: transform .15s ease, border-color .15s ease;
+}
+.st-key-metric_meetings button:hover, .st-key-metric_actions button:hover, .st-key-metric_hours button:hover {
+  transform: translateY(-2px); border-color: #FF7A1A; color: #E8EEF7;
+}
+.st-key-metric_meetings button [data-testid="stMarkdownContainer"],
+.st-key-metric_actions button [data-testid="stMarkdownContainer"],
+.st-key-metric_hours button [data-testid="stMarkdownContainer"] { width: 100%; text-align: left; }
+.st-key-metric_meetings button p, .st-key-metric_actions button p, .st-key-metric_hours button p { margin: 0; text-align: left; font-size: .95rem; }
+.st-key-metric_meetings button p:first-child, .st-key-metric_actions button p:first-child, .st-key-metric_hours button p:first-child {
+  font-size: 2.4rem; font-weight: 700; line-height: 1.2; color: #E8EEF7; margin-bottom: .25rem;
+}

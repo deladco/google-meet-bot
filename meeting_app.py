@@ -851,8 +851,7 @@ def dashboard_page():
     ]
     for column, (key, label, value, page, tip) in zip(metric_columns, metric_cards):
         with column.container(key=key):
-            st.metric(label, value, border=True)
-            if st.button(tip, key=f"{key}_open", help=tip, type="tertiary"):
+            if st.button(f"{value}\n\n{label}", key=f"{key}_open", help=tip, width="stretch"):
                 st.switch_page(page)
 
     projects_section(meetings)
