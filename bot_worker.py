@@ -13,6 +13,7 @@ PulseAudio and ffmpeg (see Dockerfile.worker).
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -123,6 +124,19 @@ class Recorder:
             )
 
     def _record_loopback(self):
+        import ctypes
+
+        # Each thread must initialise COM itself, otherwise soundcard fails with 0x800401f0.
+        ole32 = ctypes.windll.ole32
+        ole32.CoInitializeEx(None, 0)
+        try:
+            self._record_loopback_inner()
+        except Exception as error:
+            print(f"Audio capture stopped: {error}", flush=True)
+        finally:
+            ole32.CoUninitialize()
+
+    def _record_loopback_inner(self):
         import numpy as np
         import soundcard as sc
 
@@ -276,17 +290,45 @@ def join_webinar(page, name):
     return True
 
 
+PLAYER_JS = "() => !!document.querySelector('video, audio, canvas')"
+PLAYER_SRC = re.compile(r"youtube|vimeo|rutube|player|stream|live|wss|vk\.com|twitch|kinescope|mux|cdn", re.I)
+
+
 def webinar_live(page):
-    """True once a player is on the page and no name/join form is left."""
+    """True once the registration form is gone and a player exists on the page or inside any (nested) frame.
+    A chat box also has a text input, so only the registration fields count as 'form still open'."""
     try:
-        has_player = page.evaluate(
-            "() => !!document.querySelector('video, audio') || "
-            "[...document.querySelectorAll('iframe')].some(f => /youtube|vimeo|rutube|player|stream|live|wss|vk\\.com|twitch/i.test(f.src))"
-        )
-        form_open = page.locator("input[type=text]:visible, input[type=email]:visible").count() > 0
+        if page.locator("input[type=email]:visible, input[type=tel]:visible").count() > 0:
+            return False
+        frames = list(getattr(page, "frames", None) or [])
+        for frame in frames or [page]:
+            try:
+                if frame.evaluate(PLAYER_JS):
+                    return True
+            except Exception:
+                continue
+        return any(PLAYER_SRC.search(getattr(f, "url", "") or "") for f in frames[1:])
     except Exception:
         return False
-    return has_player and not form_open
+
+
+def webinar_debug(page):
+    """What the bot saw, for the failure message: no query strings, no page text beyond a short snippet."""
+    try:
+        frames = [(getattr(f, "url", "") or "").split("?")[0][:80] for f in (page.frames or [])]
+        form = page.locator("input[type=email]:visible, input[type=tel]:visible").count()
+        body = " ".join(page_text(page).split())[:140]
+        return f"url={page.url.split('?')[0]}; registration_fields_visible={form}; frames={frames[:6]}; text='{body}'"
+    except Exception as error:
+        return f"unavailable ({type(error).__name__})"
+
+
+def browser_closed(page, browser):
+    """True if the bot's browser window or tab is gone (closed by hand or crashed)."""
+    try:
+        return page.is_closed() or not browser.is_connected()
+    except Exception:
+        return True
 
 
 def in_meeting(page, platform="meet"):
@@ -408,10 +450,22 @@ def record_meeting(db, job, wav_path):
                 )
                 last_message = "manual"
             while not in_meeting(page, platform):
+                if browser_closed(page, browser):
+                    raise RuntimeError(
+                        "The bot's browser window was closed before it was admitted. "
+                        "Leave the bot's window open (don't close it) and send the bot again."
+                    )
                 reason = denied_reason(page)
                 if reason:
                     raise RuntimeError(reason)
                 if time.time() > lobby_deadline:
+                    if platform == "webinar":
+                        seen = webinar_debug(page)
+                        print(f"Webinar player not detected: {seen}", flush=True)
+                        raise RuntimeError(
+                            "The bot could not detect the webinar player in time (it may already be inside the "
+                            f"webinar). What it saw: {seen}"
+                        )
                     raise RuntimeError("The bot was not admitted to the meeting in time.")
                 if job_status(db, job["id"]) == "stop_requested":
                     return False
@@ -455,7 +509,10 @@ def record_meeting(db, job, wav_path):
                 _click_first(page, ["Leave call", "Leave", "Hang up"], 1000)
             except Exception:
                 pass
-            browser.close()
+            try:
+                browser.close()
+            except Exception:
+                pass
 
 
 def run_job(db, job):
