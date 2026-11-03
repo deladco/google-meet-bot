@@ -31,6 +31,7 @@ load_dotenv(dotenv_path=PROJECT_DIR / ".env")
 
 import auth_db
 import calendar_sync
+import chunked_audio
 import meeting_bot
 from meeting_history import MeetingHistory
 from live_captions import LiveCaptions
@@ -575,13 +576,22 @@ def convert_to_wav(source, target):
 
 
 def run_audio_job(db, job):
-    """Transcribe a recording uploaded from the mobile app."""
+    """Transcribe a recording uploaded from the mobile app or streamed in chunks by the browser."""
     set_audio_job(db, job["id"], status="processing")
+    chunked = bool(job.get("chunked"))
     with tempfile.TemporaryDirectory() as temp_dir:
         raw_path = Path(temp_dir) / "upload"
-        raw_path.write_bytes(db.storage.from_(AUDIO_BUCKET).download(job["storage_path"]))
         wav_path = Path(temp_dir) / "recording.wav"
-        convert_to_wav(raw_path, wav_path)
+        if chunked:
+            prefix = job["storage_path"]
+            chunks = chunked_audio.list_chunks(db, prefix)
+            if not chunks:
+                raise RuntimeError("No audio was uploaded for this recording.")
+            chunked_audio.download_chunks(db, prefix, chunks, raw_path)
+            chunked_audio.write_wav(chunked_audio.decode_partial(raw_path), wav_path)
+        else:
+            raw_path.write_bytes(db.storage.from_(AUDIO_BUCKET).download(job["storage_path"]))
+            convert_to_wav(raw_path, wav_path)
         if wav_path.stat().st_size < 10_000:
             raise RuntimeError("The recording is empty or too short.")
         result = process_uploaded_recording(
@@ -601,9 +611,53 @@ def run_audio_job(db, job):
     auth_db.save_meeting_from_history(db, saved, owner_email=job.get("user_email"), user_id=job["user_id"])
     set_audio_job(db, job["id"], status="done", meeting_id=result["meeting_id"], message=result.get("error"))
     try:
-        db.storage.from_(AUDIO_BUCKET).remove([job["storage_path"]])  # keep no audio after transcription
+        paths = (
+            [f"{job['storage_path']}/{c['name']}" for c in chunked_audio.list_chunks(db, job["storage_path"])]
+            if chunked
+            else [job["storage_path"]]
+        )
+        db.storage.from_(AUDIO_BUCKET).remove(paths)  # keep no audio after transcription
     except Exception:
         pass
+
+
+LIVE_JOBS = {}
+
+
+def poll_recording_jobs(db):
+    """Captions browser recordings that are still in progress, and finishes ones whose browser vanished."""
+    try:
+        jobs = (
+            db.table(AUDIO_TABLE).select("*").eq("chunked", True).eq("status", "recording")
+            .order("created_at").limit(5).execute().data
+        )
+    except Exception:
+        jobs = []  # migration not run yet
+    active = {job["id"] for job in jobs}
+    for job_id in [j for j in LIVE_JOBS if j not in active]:
+        LIVE_JOBS.pop(job_id).cleanup()
+    for job in jobs:
+        try:
+            chunks = chunked_audio.list_chunks(db, job["storage_path"])
+            if chunked_audio.is_stale(chunks, job["created_at"]):
+                set_audio_job(
+                    db, job["id"], status="queued",
+                    message="The browser stopped sending audio, so the part that was saved is being transcribed.",
+                )
+                continue
+            if not LIVE_CAPTIONS:
+                continue
+            live = LIVE_JOBS.get(job["id"])
+            if live is None:
+                folder = Path(tempfile.gettempdir()) / "meet_live"
+                folder.mkdir(exist_ok=True)
+                live = LIVE_JOBS[job["id"]] = chunked_audio.LiveRecordingCaptions(job["id"], job["storage_path"], folder)
+            live.tick(
+                db,
+                lambda text, job_id=job["id"]: db.table(AUDIO_TABLE).update({"live_transcript": text}).eq("id", job_id).execute(),
+            )
+        except Exception as error:
+            print("Live recording check failed:", error, flush=True)
 
 
 def poll_audio_jobs(db):
@@ -636,6 +690,7 @@ def main():
                 calendar_sync.sync_feeds(db)
             except Exception as error:
                 print("Calendar sync skipped:", error)
+        poll_recording_jobs(db)
         if poll_audio_jobs(db):
             continue
         try:

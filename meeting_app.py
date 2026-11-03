@@ -1,5 +1,4 @@
 import csv
-import hashlib
 import hmac
 import io
 import json
@@ -27,7 +26,7 @@ from remote_workflow import process_uploaded_recording
 import meeting_bot
 import minutes_store
 import rag
-from tab_recorder import tab_recorder
+from live_recorder import live_recorder
 from transcript_quality import LEARNED_FILE, vocabulary
 
 PROJECT_DIR = Path(__file__).resolve().parent
@@ -429,39 +428,92 @@ AUDIO_JOB_LABELS = {
 }
 
 
-def audio_job_panel():
-    """Shows the state of the queued recording; it keeps going even if this page is closed."""
+def audio_job_status():
+    """Draws the state of the queued or running recording; it carries on even if this page is closed."""
     job_id = st.session_state.get("active_audio_job")
     if not job_id:
+        return
+    try:
+        rows = auth_db.client_for_user().table("audio_jobs").select("*").eq("id", job_id).limit(1).execute().data
+    except Exception as error:
+        st.warning(f"Could not check the recording status: {error}")
+        return
+    job = rows[0] if rows else None
+    if not job:
+        st.session_state.pop("active_audio_job", None)
+        return
+    status = job["status"]
+    if status == "done":
+        if st.session_state.get("audio_job_done") != job_id:
+            st.session_state["audio_job_done"] = job_id
+            refresh_meetings()
+        st.success("Done. Open **My Meetings** to read the notes and transcript.")
+        if job.get("message"):
+            st.warning(job["message"])
+    elif status == "failed":
+        st.error(f"Transcription failed: {job.get('message') or 'unknown error'}. Your audio is still stored.")
+    elif status == "recording":
+        st.info(
+            "Recording. Your audio is saved to your account every few seconds, so it is safe even if this page closes.",
+            icon=":material/fiber_manual_record:",
+        )
+        live_text = (job.get("live_transcript") or "").strip()
+        if live_text:
+            st.markdown("**:material/graphic_eq: Live captions**")
+            with st.container(height=260, border=True):
+                st.text(live_text)
+            st.caption("Captions come from the worker and appear a little behind the speaker. The final transcript is more accurate and names speakers.")
+        else:
+            st.caption("Live captions will appear here once the worker has heard some speech (it must be running).")
+    else:
+        st.info(AUDIO_JOB_LABELS.get(status, status), icon=":material/cloud_upload:")
+        if job.get("message"):
+            st.caption(job["message"])
+        live_text = (job.get("live_transcript") or "").strip()
+        if live_text:
+            with st.expander("Live captions so far"):
+                st.text(live_text)
+
+
+def audio_job_panel():
+    """Polling wrapper for recordings that were queued as a finished file."""
+    if not st.session_state.get("active_audio_job"):
         return
 
     @st.fragment(run_every="5s")
     def panel():
-        try:
-            rows = (
-                auth_db.client_for_user().table("audio_jobs").select("*").eq("id", job_id).limit(1).execute().data
-            )
-        except Exception as error:
-            st.warning(f"Could not check the recording status: {error}")
-            return
-        job = rows[0] if rows else None
-        if not job:
-            st.session_state.pop("active_audio_job", None)
-            return
-        status = job["status"]
-        if status == "done":
-            if st.session_state.get("audio_job_done") != job_id:
-                st.session_state["audio_job_done"] = job_id
-                refresh_meetings()
-            st.success("Done. Open **My Meetings** to read the notes and transcript.")
-            if job.get("message"):
-                st.warning(job["message"])
-        elif status == "failed":
-            st.error(f"Transcription failed: {job.get('message') or 'unknown error'}. Your audio is still stored.")
-        else:
-            st.info(AUDIO_JOB_LABELS.get(status, status), icon=":material/cloud_upload:")
+        audio_job_status()
 
     panel()
+
+
+def live_recording_section(source, consent):
+    """Browser recorder that streams to the cloud while recording; the worker adds live captions."""
+
+    @st.fragment(run_every="5s")
+    def section():
+        language = LANGUAGES.get(st.session_state.get("transcription_language", "Auto-detect"))
+        recorder = live_recorder(source=source, enabled=consent, language=language, key=f"live_recorder_{source}")
+        if recorder.started:
+            st.session_state["active_audio_job"] = recorder.started
+            st.session_state.pop("audio_job_done", None)
+            st.session_state.pop("last_recording_result", None)
+        if recorder.finished:
+            st.session_state["active_audio_job"] = recorder.finished
+        if recorder.local:
+            audio_bytes, mime = recorder.local
+            try:
+                extension = "ogg" if "ogg" in mime else "webm"
+                st.session_state["last_recording_result"] = process_audio(
+                    audio_bytes, f"{source}-recording.{extension}", consent
+                )
+            except Exception as error:
+                st.error(f"Meeting processing failed: {error}")
+        audio_job_status()
+        if st.session_state.get("last_recording_result"):
+            show_processing_result(st.session_state["last_recording_result"])
+
+    section()
 
 
 def save_to_cloud(result):
@@ -638,34 +690,12 @@ def new_meeting_section():
 
     if audio_source == "Browser microphone":
         st.caption(
-            "Use the recorder’s Start/Stop controls. This captures your browser microphone, "
-            "not Meet tab or system audio."
+            "Press Start and speak; press Stop when you are done. This captures your browser microphone, "
+            "not Meet tab or system audio. The recording is saved to your account while you talk."
         )
         if not consent_confirmed:
             st.info("Confirm recording consent above to enable the microphone recorder.")
-            st.session_state.pop("processed_browser_audio_hash", None)
-            return
-        recorded_audio = st.audio_input(
-            "Record from microphone",
-            sample_rate=16000,
-            key="meeting_microphone_recording",
-        )
-        if recorded_audio is None:
-            st.session_state.pop("processed_browser_audio_hash", None)
-            return
-        audio_bytes = recorded_audio.getvalue()
-        audio_hash = hashlib.sha256(audio_bytes).hexdigest()
-        if audio_hash != st.session_state.get("processed_browser_audio_hash"):
-            try:
-                result = submit_recording(audio_bytes, "browser-recording.wav", consent_confirmed)
-                st.session_state["processed_browser_audio_hash"] = audio_hash
-                if result:
-                    st.session_state["last_recording_result"] = result
-            except Exception as error:
-                st.error(f"Meeting processing failed: {error}")
-        audio_job_panel()
-        if st.session_state.get("last_recording_result"):
-            show_processing_result(st.session_state["last_recording_result"])
+        live_recording_section("mic", consent_confirmed)
     elif audio_source == "Send AI bot to a meeting":
         st.caption(
             "The AI assistant joins your Google Meet, Zoom or Microsoft Teams meeting as a "
@@ -715,22 +745,7 @@ def new_meeting_section():
         )
         if not consent_confirmed:
             st.info("Confirm recording consent above to enable the recorder.")
-        tab_audio = tab_recorder(enabled=consent_confirmed, key="meeting_tab_recorder")
-        if tab_audio is not None and consent_confirmed:
-            tab_bytes, tab_mime = tab_audio
-            tab_hash = hashlib.sha256(tab_bytes).hexdigest()
-            if tab_hash != st.session_state.get("processed_tab_audio_hash"):
-                try:
-                    extension = "ogg" if "ogg" in tab_mime else "webm"
-                    result = submit_recording(tab_bytes, f"tab-recording.{extension}", consent_confirmed)
-                    st.session_state["processed_tab_audio_hash"] = tab_hash
-                    if result:
-                        st.session_state["last_recording_result"] = result
-                except Exception as error:
-                    st.error(f"Meeting processing failed: {error}")
-        audio_job_panel()
-        if st.session_state.get("last_recording_result"):
-            show_processing_result(st.session_state["last_recording_result"])
+        live_recording_section("tab", consent_confirmed)
     else:
         with st.form("meeting_upload", clear_on_submit=False):
             uploaded_audio = st.file_uploader(
