@@ -381,6 +381,89 @@ def process_audio(audio_bytes, filename, consent):
     return result
 
 
+def queue_recording(audio_bytes, filename, consent):
+    """Stores the audio in Supabase first so an app crash can't lose it; the worker transcribes it.
+
+    Returns the job id, or None when cloud storage or the queue isn't available (caller processes locally).
+    """
+    if not (consent and auth_db.is_configured() and st.session_state.get("supabase_user") and viewer_id):
+        return None
+    suffix = Path(filename).suffix.casefold() or ".wav"
+    path = f"{viewer_id}/{datetime.now(timezone.utc):%Y%m%d_%H%M%S}_{os.urandom(4).hex()}{suffix}"
+    try:
+        db = auth_db.client_for_user()
+        db.storage.from_("recordings").upload(
+            path, audio_bytes, {"content-type": "application/octet-stream"}
+        )
+        row = (
+            db.table("audio_jobs")
+            .insert(
+                {
+                    "user_id": viewer_id,
+                    "user_email": viewer_email,
+                    "storage_path": path,
+                    "filename": Path(filename).name,
+                    "language": LANGUAGES.get(st.session_state.get("transcription_language", "Auto-detect")),
+                }
+            )
+            .execute()
+            .data
+        )
+        return row[0]["id"]
+    except Exception:
+        return None  # migration not run or storage unreachable: fall back to local processing
+
+
+def submit_recording(audio_bytes, filename, consent):
+    """Queues the recording for the worker when possible, otherwise transcribes it in the app."""
+    job_id = queue_recording(audio_bytes, filename, consent)
+    if job_id:
+        st.session_state["active_audio_job"] = job_id
+        return None
+    return process_audio(audio_bytes, filename, consent)
+
+
+AUDIO_JOB_LABELS = {
+    "queued": "Saved safely. Waiting for the worker to pick it up (it must be running).",
+    "processing": "The worker is transcribing and writing the notes. You can close this page.",
+}
+
+
+def audio_job_panel():
+    """Shows the state of the queued recording; it keeps going even if this page is closed."""
+    job_id = st.session_state.get("active_audio_job")
+    if not job_id:
+        return
+
+    @st.fragment(run_every="5s")
+    def panel():
+        try:
+            rows = (
+                auth_db.client_for_user().table("audio_jobs").select("*").eq("id", job_id).limit(1).execute().data
+            )
+        except Exception as error:
+            st.warning(f"Could not check the recording status: {error}")
+            return
+        job = rows[0] if rows else None
+        if not job:
+            st.session_state.pop("active_audio_job", None)
+            return
+        status = job["status"]
+        if status == "done":
+            if st.session_state.get("audio_job_done") != job_id:
+                st.session_state["audio_job_done"] = job_id
+                refresh_meetings()
+            st.success("Done. Open **My Meetings** to read the notes and transcript.")
+            if job.get("message"):
+                st.warning(job["message"])
+        elif status == "failed":
+            st.error(f"Transcription failed: {job.get('message') or 'unknown error'}. Your audio is still stored.")
+        else:
+            st.info(AUDIO_JOB_LABELS.get(status, status), icon=":material/cloud_upload:")
+
+    panel()
+
+
 def save_to_cloud(result):
     """Copy the finished meeting to Supabase; the server disk is wiped on redeploy."""
     if not (auth_db.is_configured() and st.session_state.get("supabase_user")):
@@ -574,11 +657,13 @@ def new_meeting_section():
         audio_hash = hashlib.sha256(audio_bytes).hexdigest()
         if audio_hash != st.session_state.get("processed_browser_audio_hash"):
             try:
-                result = process_audio(audio_bytes, "browser-recording.wav", consent_confirmed)
+                result = submit_recording(audio_bytes, "browser-recording.wav", consent_confirmed)
                 st.session_state["processed_browser_audio_hash"] = audio_hash
-                st.session_state["last_recording_result"] = result
+                if result:
+                    st.session_state["last_recording_result"] = result
             except Exception as error:
                 st.error(f"Meeting processing failed: {error}")
+        audio_job_panel()
         if st.session_state.get("last_recording_result"):
             show_processing_result(st.session_state["last_recording_result"])
     elif audio_source == "Send AI bot to a meeting":
@@ -637,11 +722,13 @@ def new_meeting_section():
             if tab_hash != st.session_state.get("processed_tab_audio_hash"):
                 try:
                     extension = "ogg" if "ogg" in tab_mime else "webm"
-                    result = process_audio(tab_bytes, f"tab-recording.{extension}", consent_confirmed)
+                    result = submit_recording(tab_bytes, f"tab-recording.{extension}", consent_confirmed)
                     st.session_state["processed_tab_audio_hash"] = tab_hash
-                    st.session_state["last_recording_result"] = result
+                    if result:
+                        st.session_state["last_recording_result"] = result
                 except Exception as error:
                     st.error(f"Meeting processing failed: {error}")
+        audio_job_panel()
         if st.session_state.get("last_recording_result"):
             show_processing_result(st.session_state["last_recording_result"])
     else:
@@ -660,10 +747,12 @@ def new_meeting_section():
             )
         if process_recording and uploaded_audio is not None:
             try:
-                result = process_audio(uploaded_audio.getvalue(), uploaded_audio.name, consent_confirmed)
-                show_processing_result(result)
+                result = submit_recording(uploaded_audio.getvalue(), uploaded_audio.name, consent_confirmed)
+                if result:
+                    show_processing_result(result)
             except Exception as error:
                 st.error(f"Meeting processing failed: {error}")
+        audio_job_panel()
 
 
 # ---------------------------------------------------------------- Q&A
