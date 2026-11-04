@@ -102,6 +102,7 @@ def fetch_events(url, start, end):
             continue
         events.append(
             {
+                "end": _as_utc(event.get("DTEND").dt) if event.get("DTEND") else None,
                 "key": f"{event.get('UID', 'event')}|{begins.isoformat()}",
                 "title": str(event.get("SUMMARY") or "Meeting"),
                 "start": begins,
@@ -137,6 +138,8 @@ def sync_feeds(db):
                 continue
             if not (event["start"] - JOIN_EARLY <= now <= event["start"] + JOIN_LATE):
                 continue
+            if event.get("end") and now >= event["end"]:
+                continue  # the meeting is already over
             row = {
                 "user_id": feed["user_id"],
                 "user_email": feed.get("user_email"),

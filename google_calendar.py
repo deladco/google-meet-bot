@@ -130,8 +130,10 @@ def fetch_events(refresh_token, start, end, link_finder):
             when = datetime.fromisoformat(day).astimezone().astimezone(timezone.utc)
         else:
             when = datetime.fromisoformat(begins).astimezone(timezone.utc)
+        finishes = (item.get("end") or {}).get("dateTime")
         events.append(
             {
+                "end": datetime.fromisoformat(finishes).astimezone(timezone.utc) if finishes else None,
                 "key": f"{item.get('id')}|{when.isoformat()}",
                 "title": item.get("summary") or "Meeting",
                 "start": when,

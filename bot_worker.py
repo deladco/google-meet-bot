@@ -86,6 +86,14 @@ def set_audio_job(db, job_id, **fields):
     db.table(AUDIO_TABLE).update(fields).eq("id", job_id).execute()
 
 
+def _audio_step(db, job_id, step):
+    """Shows the current processing step in the app; a failed progress write must never fail the job."""
+    try:
+        set_audio_job(db, job_id, message=step)
+    except Exception:
+        pass
+
+
 def job_status(db, job_id):
     row = get_row(db, job_id)
     return row["status"] if row else "cancelled"
@@ -459,6 +467,8 @@ def record_meeting(db, job, wav_path):
                 reason = denied_reason(page)
                 if reason:
                     raise RuntimeError(reason)
+                if platform != "webinar" and meeting_over(page) and not in_lobby(page):
+                    raise RuntimeError("The meeting has already ended, so the bot did not join.")
                 if time.time() > lobby_deadline:
                     if platform == "webinar":
                         seen = webinar_debug(page)
@@ -601,6 +611,7 @@ def run_audio_job(db, job):
             owner_id=job["user_id"],
             owner_email=job.get("user_email"),
             language=job.get("language") or None,
+            progress=lambda step: _audio_step(db, job["id"], step),
         )
     saved = next(
         (m for m in MeetingHistory().list_meetings(limit=50) if m["meeting_id"] == result["meeting_id"]),

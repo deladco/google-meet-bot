@@ -25,6 +25,7 @@ from meeting_history import MeetingHistory
 from remote_workflow import process_uploaded_recording
 import meeting_bot
 import minutes_store
+import note_feedback
 import rag
 from live_recorder import live_recorder
 from transcript_quality import LEARNED_FILE, vocabulary
@@ -422,6 +423,14 @@ def submit_recording(audio_bytes, filename, consent):
     return process_audio(audio_bytes, filename, consent)
 
 
+AUDIO_JOB_STEPS = [
+    "Converting speech to text",
+    "Identifying who is speaking",
+    "Checking spelling of names and terms",
+    "Writing the summary and action items",
+    "Saving notes",
+]
+
 AUDIO_JOB_LABELS = {
     "queued": "Saved safely. Waiting for the worker to pick it up (it must be running).",
     "processing": "The worker is transcribing and writing the notes. You can close this page.",
@@ -465,6 +474,15 @@ def audio_job_status():
             st.caption("Captions come from the worker and appear a little behind the speaker. The final transcript is more accurate and names speakers.")
         else:
             st.caption("Live captions will appear here once the worker has heard some speech (it must be running).")
+    elif status == "processing":
+        step = job.get("message")
+        index = AUDIO_JOB_STEPS.index(step) if step in AUDIO_JOB_STEPS else 0
+        st.progress((index + 0.5) / len(AUDIO_JOB_STEPS), text=f"Transcribing: {step or AUDIO_JOB_STEPS[0]}")
+        st.caption(AUDIO_JOB_LABELS["processing"])
+        live_text = (job.get("live_transcript") or "").strip()
+        if live_text:
+            with st.expander("Live captions so far"):
+                st.text(live_text)
     else:
         st.info(AUDIO_JOB_LABELS.get(status, status), icon=":material/cloud_upload:")
         if job.get("message"):
@@ -896,11 +914,11 @@ def open_task_board(project):
 
 def projects_section(meetings):
     rows = minutes_store.task_rows(meetings)
-    names = minutes_store.all_projects(load_projects(), rows)
-    stats = minutes_store.project_stats(rows, names)
+    names = minutes_store.all_projects(load_projects(), rows, meetings)
+    stats = minutes_store.project_stats(rows, names, meetings)
     with st.container(border=True, key="projects"):
         st.subheader("Projects", anchor=False)
-        st.caption("Group your tasks by project. Move a task into a project from the Task board.")
+        st.caption("Group your meetings and tasks by project. Use the folder icon on a meeting to assign it; its tasks follow.")
         if st.session_state.get("task_error"):
             st.error(st.session_state["task_error"])
         entries = [(name, stats[name]) for name in names]
@@ -913,7 +931,15 @@ def projects_section(meetings):
             for column, (name, counts) in zip(columns, entries[start : start + 3]):
                 with column.container(border=True):
                     st.markdown(f"**{name}**")
-                    st.caption(f"{counts['open']} open · {counts['done']} done")
+                    st.caption(f"{counts['meetings']} meetings · {counts['open']} open · {counts['done']} done")
+                    if name != UNASSIGNED and counts["meetings"]:
+                        with st.popover("Meetings", icon=":material/event_note:", width="stretch"):
+                            for meeting in meetings:
+                                if minutes_store.meeting_project(meeting).casefold() == name.casefold():
+                                    if st.button(
+                                        meeting_title(meeting), key=f"proj_mtg_{name}_{meeting['id']}", type="tertiary"
+                                    ):
+                                        open_meeting(meeting["id"])
                     if st.button("Open tasks", key=f"open_project_{name}", type="tertiary", icon=":material/arrow_forward:"):
                         open_task_board(name)
         add_project_form("add_project_dashboard")
@@ -1137,11 +1163,42 @@ def rename_meeting(meeting, new_title):
     return True
 
 
+def assign_meeting_project(meeting, name):
+    """Saves a meeting's project into its notes; '' clears it. Cloud meetings with notes only."""
+    minutes = dict(meeting["minutes"])
+    minutes_store.set_meeting_project(minutes, name)
+    return persist_minutes(meeting, minutes, "Meeting moved to " + name if name else "Meeting removed from its project")
+
+
+def project_picker(meeting, key):
+    """Popover with the user's projects; assigning a project also files the meeting's tasks under it."""
+    names = minutes_store.all_projects(load_projects(), [], load_meetings())
+    current = minutes_store.meeting_project(meeting)
+    options = [NO_PROJECT, *names]
+    with st.form(f"project_form_{key}_{meeting['id']}", border=False):
+        choice = st.selectbox(
+            "Project", options, index=options.index(current) if current in options else 0, key=f"pp_{key}_{meeting['id']}"
+        )
+        new_name = st.text_input("Or create a new project", placeholder="New project name", key=f"pn_{key}_{meeting['id']}")
+        if st.form_submit_button("Save", type="primary", icon=":material/check:"):
+            target = minutes_store.clean_project(new_name) or ("" if choice == NO_PROJECT else choice)
+            if target and target.casefold() not in {n.casefold() for n in names}:
+                store_projects(minutes_store.add_project(load_projects(), target))
+            target = next((n for n in [*names, target] if n.casefold() == target.casefold()), target)
+            if assign_meeting_project(meeting, target):
+                st.rerun()
+
+
 def meeting_card(meeting, key_prefix, show_open=True):
     """Compact, mobile-friendly summary of one meeting."""
+    can_assign = meeting["source"] == "cloud" and bool(meeting["minutes"])
     with st.container(border=True):
-        title_column, pencil_column = st.columns([12, 1], vertical_alignment="center", gap="small")
+        title_column, project_column, pencil_column = st.columns([10, 1, 1], vertical_alignment="center", gap="small")
         title_column.markdown(f"**{meeting_title(meeting)}**")
+        if can_assign:
+            with project_column.container(key=f"renamebtn_proj_{key_prefix}_{meeting['id']}"):
+                with st.popover("", icon=":material/folder:", help="Assign to a project"):
+                    project_picker(meeting, key_prefix)
         with pencil_column.container(key=f"renamebtn_{key_prefix}_{meeting['id']}"):
             with st.popover("", icon=":material/edit:", help="Rename meeting"):
                 with st.form(f"rename_form_{key_prefix}_{meeting['id']}", border=False):
@@ -1156,7 +1213,10 @@ def meeting_card(meeting, key_prefix, show_open=True):
             )
         else:
             detail = status_label(meeting)
-        st.caption(f"{when_label(meeting['recorded_at'])} · {detail}")
+        st.caption(
+            f"{when_label(meeting['recorded_at'])} · {detail}"
+            + (f" · :material/folder: {minutes_store.meeting_project(meeting)}" if minutes_store.meeting_project(meeting) else "")
+        )
         if show_open and st.button("Open", key=f"{key_prefix}_{meeting['id']}", type="tertiary", icon=":material/arrow_forward:"):
             open_meeting(meeting["id"])
 
@@ -1275,6 +1335,11 @@ def show_minutes(meeting):
             icon=":material/edit_note:",
         )
     if cloud:
+        project_column, _spacer = st.columns(2)
+        with project_column.popover(
+            minutes.get("project") or "Assign to a project", icon=":material/folder:", width="stretch"
+        ):
+            project_picker(meeting, "detail")
         edit_column, approve_column = st.columns(2)
         if edit_column.button("Edit notes", icon=":material/edit:", width="stretch", key=f"edit_btn_{meeting['id']}"):
             st.session_state[f"editing_{meeting['id']}"] = True
@@ -1378,6 +1443,10 @@ def edit_minutes_form(meeting):
     if save:
         updated = minutes_store.apply_edits(minutes, summary, decisions_text, rows)
         if persist_minutes(meeting, updated, "Notes saved as draft"):
+            try:
+                note_feedback.record_edit(st.session_state.get("user_id"), minutes, updated)
+            except Exception:
+                pass  # learning from edits must never block saving them
             for key in [k for k in st.session_state if str(k).endswith(f"_{mid}") or f"_{mid}_" in str(k)]:
                 if key.startswith(("et_", "eo_", "ed_", "er_", "nt_", "no_", "nd_")):
                     st.session_state.pop(key, None)
@@ -1636,7 +1705,7 @@ def actions_page():
     metric_columns[3].metric("Done", sum(r["done"] for r in rows), border=True)
 
     view = st.segmented_control("Show", TASK_VIEWS, default="Open", label_visibility="collapsed") or "Open"
-    project_names = minutes_store.all_projects(load_projects(), rows)
+    project_names = minutes_store.all_projects(load_projects(), rows, meetings)
     project_options = [*project_names, UNASSIGNED]
     if "pending_project_filter" in st.session_state:
         st.session_state["task_projects"] = st.session_state.pop("pending_project_filter")
@@ -1933,10 +2002,29 @@ def settings_page():
                 st.success("Connected to Ollama API.")
 
 
+def projects_page():
+    st.title("Projects")
+    meetings = load_meetings()
+    projects_section(meetings)
+    cloud = [m for m in meetings if m["source"] == "cloud" and m["minutes"]]
+    names = minutes_store.all_projects(load_projects(), minutes_store.task_rows(meetings), meetings)
+    groups = [(name, [m for m in cloud if minutes_store.meeting_project(m).casefold() == name.casefold()]) for name in names]
+    groups.append(("No project", [m for m in cloud if not minutes_store.meeting_project(m)]))
+    for name, members in groups:
+        st.subheader(f"{name} ({len(members)})", anchor=False)
+        if not members:
+            st.caption("No meetings yet. Use the folder icon on any meeting to add it here.")
+        for meeting in members:
+            meeting_card(meeting, f"proj_{name}")
+    if len(cloud) < len(meetings):
+        st.caption("Meetings that are not saved to your account yet can't be assigned to a project.")
+
+
 PAGE_DASHBOARD = st.Page(dashboard_page, title="Dashboard", icon=":material/dashboard:", url_path="dashboard", default=True)
 PAGE_MEETINGS = st.Page(meetings_page, title="My Meetings", icon=":material/event_note:", url_path="meetings")
 PAGE_CHAT = st.Page(chat_page, title="Ask AI", icon=":material/chat:", url_path="chat")
 PAGE_ACTIONS = st.Page(actions_page, title="Task board", icon=":material/task_alt:", url_path="actions")
+PAGE_PROJECTS = st.Page(projects_page, title="Projects", icon=":material/folder:", url_path="projects")
 PAGE_CALENDAR = st.Page(calendar_page, title="Calendar", icon=":material/calendar_month:", url_path="calendar")
 PAGE_SETTINGS = st.Page(settings_page, title="Settings", icon=":material/settings:", url_path="settings")
 
@@ -1944,7 +2032,7 @@ THEME_CSS = (PROJECT_DIR / "assets" / "theme.css").read_text(encoding="utf-8")
 st.markdown(f"<style>{THEME_CSS}</style>", unsafe_allow_html=True)
 
 st.logo(str(LOGO_FILE), size="large")
-navigation = st.navigation([PAGE_DASHBOARD, PAGE_MEETINGS, PAGE_CALENDAR, PAGE_CHAT, PAGE_ACTIONS, PAGE_SETTINGS], position="top")
+navigation = st.navigation([PAGE_DASHBOARD, PAGE_MEETINGS, PAGE_PROJECTS, PAGE_CALENDAR, PAGE_CHAT, PAGE_ACTIONS, PAGE_SETTINGS], position="top")
 handle_google_callback()
 navigation.run()
 st.divider()

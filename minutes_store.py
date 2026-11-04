@@ -147,31 +147,55 @@ def add_project(names, name):
     return [*names, name]
 
 
-def all_projects(stored, rows):
-    """Stored projects plus any named on tasks, in a stable order."""
+def meeting_project(meeting):
+    return clean_project(((meeting or {}).get("minutes") or {}).get("project"))
+
+
+def set_meeting_project(minutes, name):
+    project = clean_project(name)
+    if project:
+        minutes["project"] = project
+    else:
+        minutes.pop("project", None)
+    return minutes
+
+
+def all_projects(stored, rows, meetings=()):
+    """Stored projects plus any named on tasks or meetings, in a stable order."""
     result = list(stored)
     for row in rows:
         if row.get("project"):
             result = add_project(result, row["project"])
+    for meeting in meetings:
+        if meeting_project(meeting):
+            result = add_project(result, meeting_project(meeting))
     return result
 
 
-def project_stats(rows, names):
-    stats = {name: {"open": 0, "done": 0} for name in names}
-    stats[""] = {"open": 0, "done": 0}
+def project_stats(rows, names, meetings=()):
+    stats = {name: {"open": 0, "done": 0, "meetings": 0} for name in names}
+    stats[""] = {"open": 0, "done": 0, "meetings": 0}
     for row in rows:
         key = row.get("project") if row.get("project") in stats else ""
         stats[key]["done" if row["done"] else "open"] += 1
+    for meeting in meetings:
+        project = meeting_project(meeting)
+        if project in stats and project:
+            stats[project]["meetings"] += 1
     return stats
 
 
 def rename_project(meetings, old, new):
-    """Moves every task from project `old` to `new`; returns the meetings that changed."""
+    """Moves every task and meeting from project `old` to `new`; returns the meetings that changed."""
     new = clean_project(new)
     changed = []
     for meeting in meetings:
         touched = False
-        for item in (meeting.get("minutes") or {}).get("action_items") or []:
+        minutes = meeting.get("minutes") or {}
+        if (minutes.get("project") or "").casefold() == old.casefold():
+            minutes["project"] = new
+            touched = True
+        for item in minutes.get("action_items") or []:
             if (item.get("project") or "").casefold() == old.casefold():
                 item["project"] = new
                 touched = True
@@ -191,11 +215,15 @@ def renamed_list(names, old, new):
 
 
 def remove_project(meetings, name):
-    """Clears a project from every task that uses it; returns the meetings that changed."""
+    """Clears a project from every task and meeting that uses it; returns the meetings that changed."""
     changed = []
     for meeting in meetings:
         touched = False
-        for item in (meeting.get("minutes") or {}).get("action_items") or []:
+        minutes = meeting.get("minutes") or {}
+        if (minutes.get("project") or "").casefold() == name.casefold():
+            minutes.pop("project", None)
+            touched = True
+        for item in minutes.get("action_items") or []:
             if (item.get("project") or "").casefold() == name.casefold():
                 item.pop("project", None)
                 touched = True
@@ -205,6 +233,7 @@ def remove_project(meetings, name):
 
 
 def task_rows(meetings):
+    """One row per action item; a task without its own project belongs to its meeting's project."""
     rows = []
     for meeting in meetings:
         minutes = meeting.get("minutes")
@@ -220,7 +249,7 @@ def task_rows(meetings):
                     "deadline": item.get("deadline") or "Not specified",
                     "due": parse_due(item.get("due")),
                     "done": item.get("status") == "done",
-                    "project": clean_project(item.get("project")),
+                    "project": clean_project(item.get("project")) or meeting_project(meeting),
                     "refs": item.get("transcript_refs") or [],
                     "meeting": meeting,
                 }

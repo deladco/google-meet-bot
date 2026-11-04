@@ -348,7 +348,7 @@ def process_uploaded_recording(
         step("Writing the summary and action items")
         history.update_status(session_id, "analyzing")
         try:
-            minutes = analyze_meeting(transcript_path)
+            minutes = analyze_meeting(transcript_path, owner_id=owner_id)
         except RuntimeError as error:
             # Keep the transcript so the meeting still shows up on the dashboard.
             message = f"{error} The transcript was saved."

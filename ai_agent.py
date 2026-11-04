@@ -5,6 +5,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+import note_feedback
 from remote_config import get_ollama_client, get_ollama_model
 
 PROJECT_DIR = Path(__file__).resolve().parent
@@ -184,7 +185,7 @@ def _parse_minutes_response(response):
 	return minutes
 
 
-def analyze_meeting(transcript_path=DEFAULT_TRANSCRIPT_FILE):
+def analyze_meeting(transcript_path=DEFAULT_TRANSCRIPT_FILE, owner_id=None):
 	entries = load_transcript(transcript_path)
 	conversation = "\n".join(
 		f"[{index}] {entry.get('timestamp', '')} "
@@ -207,6 +208,7 @@ def analyze_meeting(transcript_path=DEFAULT_TRANSCRIPT_FILE):
 				"provided transcript. Never invent or infer owners, deadlines, "
 				"decisions, or facts. Use 'Not specified' when an owner or deadline "
 				"is not explicit. Return empty arrays when there is no evidence."
+				+ note_feedback.guidance(owner_id)
 			)
 		},
 		{"role": "user", "content": conversation}
