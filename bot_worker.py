@@ -120,6 +120,8 @@ class Recorder:
 
     def start(self):
         if sys.platform == "win32":
+            import soundcard  # noqa: F401 - must be imported here: it initialises COM itself and fails if the thread already did
+
             self._thread = threading.Thread(target=self._record_loopback, daemon=True)
             self._thread.start()
         else:
