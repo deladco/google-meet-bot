@@ -59,6 +59,16 @@ python meeting_history.py ask "Which tasks were assigned last week?"
 
 Never commit `.env`, OAuth credentials, tokens, virtual environments, databases, recordings, transcripts, or meeting notes. Those paths are excluded by `.gitignore` and `.dockerignore`.
 
+## Worker recording health and restart recovery
+
+The meeting worker checks capture health every few seconds. It warns in the dashboard after 60 seconds of near-silence and clears the warning when sound returns. Silence alone does not end the meeting. If capture stops producing data for 20 seconds, the capture process fails, or the browser disconnects, the worker stops recording and processes the captured portion. The completed job retains a partial-recording warning.
+
+Bot recordings and job checkpoints now live under `output/worker_recovery`, configurable with `BOT_RECOVERY_DIR`. Keep that directory, the meeting SQLite database (`MEETING_DB_PATH`), and generated transcripts/notes on persistent storage. For a container worker, mount persistent volumes at `/app/output` and `/app/data`, set `MEETING_DB_PATH=/app/data/meeting_history.sqlite3`, and keep the same volumes when replacing the container. Deleting those volumes loses local recovery data.
+
+On startup, the worker recovers its checkpointed jobs. It repairs incomplete WAV headers and transcribes captured audio, retries interrupted mobile/browser-upload processing from cloud storage, and retries cloud saving of an already processed meeting without retranscribing it. It never automatically rejoins an interrupted call; audio during worker downtime cannot be recovered. A job interrupted before capturing audio fails with instructions to send the bot again. Jobs created before checkpoints were introduced cannot be recovered automatically.
+
+Recovery retries are limited to three worker starts. Recordings and checkpoints are deleted after successful cloud saving; failures retain them for recovery. After the retry limit, inspect the job's `.json` and `.wav` files in the recovery directory for manual recovery. Recovery directories belong to one worker host; an OS lock prevents two local worker processes from using the same directory simultaneously. This is single-host recovery, not a distributed worker lease.
+
 ## Transcription quality
 
 On an NVIDIA GPU the worker uses Whisper large-v3-turbo (CPU hosts: small), detects the language per segment, cleans the audio (high-pass, plus noise reduction if `noisereduce` is installed), biases Whisper toward your vocabulary, and runs an Ollama pass that fixes obvious misspellings. Tune it with the optional variables in `.env.example` (`WHISPER_MODEL`, `WHISPER_LANGUAGE`, `WHISPER_VOCABULARY` / `vocabulary.txt`, `AUDIO_CLEANUP`, `TRANSCRIPT_LLM_CORRECTION`). GPU hosts also need `nvidia-cublas-cu12 nvidia-cudnn-cu12` and a CUDA build of torch for fast speaker labelling.

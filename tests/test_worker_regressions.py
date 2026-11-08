@@ -12,6 +12,11 @@ import bot_worker as bw
 import remote_workflow as workflow
 
 
+@pytest.fixture(autouse=True)
+def isolated_recovery(monkeypatch, tmp_path):
+    monkeypatch.setattr(bw, "RECOVERY_DIR", tmp_path)
+
+
 def test_transcription_preserves_repeated_responses(monkeypatch):
     monkeypatch.setattr(workflow, "vocabulary", list)
     segments = [

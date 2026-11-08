@@ -648,7 +648,10 @@ def render_bot_status():
                 "access to the meeting's audio to pick this up."
             )
         if job.get("message"):
-            st.caption(job["message"])
+            if code == "recording":
+                st.warning(job["message"])
+            else:
+                st.caption(job["message"])
         live_text = (job.get("live_transcript") or "").strip()
         if code in ("recording", "stop_requested") and live_text:
             st.markdown("**:material/graphic_eq: Live captions**")

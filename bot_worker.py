@@ -37,6 +37,7 @@ import meeting_bot
 from live_captions import LiveCaptions
 from meeting_history import MeetingHistory
 from remote_workflow import process_uploaded_recording
+from worker_state import Checkpoint, RecordingHealth, repair_wav, worker_lock
 
 LIVE_CAPTIONS = os.environ.get("BOT_LIVE_CAPTIONS", "1") == "1"
 SAMPLE_RATE = 16000
@@ -47,6 +48,8 @@ AUDIO_BUCKET = "recordings"
 MAX_MINUTES = int(os.environ.get("BOT_MAX_MINUTES", "180"))
 LOBBY_MINUTES = int(os.environ.get("BOT_LOBBY_MINUTES", "10"))
 HEADLESS = os.environ.get("BOT_HEADLESS", "0" if sys.platform == "win32" else "1") == "1"
+RECOVERY_DIR = Path(os.environ.get("BOT_RECOVERY_DIR") or PROJECT_DIR / "output" / "worker_recovery")
+MAX_RECOVERY_ATTEMPTS = 3
 
 ENDED_TEXTS = (
     "You've been removed from the meeting",
@@ -118,6 +121,7 @@ class Recorder:
         self._stop = threading.Event()
         self._thread = None
         self._process = None
+        self.error = None
 
     def start(self):
         if sys.platform == "win32":
@@ -146,6 +150,7 @@ class Recorder:
         except Exception as error:
             logging.getLogger(__name__).debug("Handled error in _record_loopback", exc_info=True)
             print(f"Audio capture stopped: {error}", flush=True)
+            self.error = "The audio capture device failed. Saving the captured portion."
         finally:
             ole32.CoUninitialize()
 
@@ -179,6 +184,20 @@ class Recorder:
                 self._process.wait(timeout=15)
             except subprocess.TimeoutExpired:
                 self._process.terminate()
+                try:
+                    self._process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    self._process.kill()
+                    self._process.wait(timeout=5)
+
+    def failure(self):
+        if self.error:
+            return self.error
+        if self._thread and not self._thread.is_alive():
+            return "The audio capture thread stopped. Saving the captured portion."
+        if self._process and self._process.poll() is not None:
+            return "The audio capture process stopped. Saving the captured portion."
+        return None
 
 
 def _click_first(page, labels, timeout=1500):
@@ -519,9 +538,25 @@ def record_meeting(db, job, wav_path):
             set_job(db, job["id"], status="recording", message=None)
             deadline = time.time() + MAX_MINUTES * 60
             started = time.time()
+            health = RecordingHealth(wav_path)
+            last_health_message = None
+            last_heartbeat = time.monotonic()
             while time.time() < deadline:
                 if job_status(db, job["id"]) == "stop_requested":
                     print(f"Stop requested from the app after {int(time.time() - started)}s", flush=True)
+                    break
+                warning, fatal = health.check()
+                failure = recorder.failure()
+                if browser_closed(page, browser):
+                    failure = "The meeting browser disconnected. Saving the captured portion."
+                if failure:
+                    warning, fatal = failure, True
+                if warning != last_health_message or time.monotonic() - last_heartbeat >= 30:
+                    set_job(db, job["id"], message=warning)
+                    last_health_message = warning
+                    last_heartbeat = time.monotonic()
+                if fatal:
+                    job["recording_warning"] = warning
                     break
                 if time.time() - started > 20 and meeting_over(page):
                     detail = page_text(page)[:120].replace("\n", " | ")
@@ -558,47 +593,48 @@ def run_job(db, job):
             "status": "cancelled", "updated_at": datetime.now(UTC).isoformat(),
         }).eq("id", job["id"]).eq("status", "stop_requested").execute()
         return
-    with tempfile.TemporaryDirectory() as temp_dir:
-        wav_path = Path(temp_dir) / "meeting.wav"
-        if not record_meeting(db, job, wav_path):
-            set_job(db, job["id"], status="cancelled")
-            return
-        if not wav_path.exists() or wav_path.stat().st_size < 10_000:
-            raise RuntimeError("No audio was captured from the meeting.")
-        keep = PROJECT_DIR / "output" / "bot_last_recording.wav"
-        keep.parent.mkdir(exist_ok=True)
-        shutil.copyfile(wav_path, keep)  # listen to this if a meeting comes back empty
+    checkpoint = Checkpoint(RECOVERY_DIR, meeting_bot.JOBS_TABLE, job["id"])
+    checkpoint.write(stage="recording")
+    if not record_meeting(db, job, checkpoint.audio):
+        set_job(db, job["id"], status="cancelled")
+        checkpoint.cleanup()
+        return
+    checkpoint.write(stage="processing", warning=job.get("recording_warning"))
+    process_bot_recording(db, job, checkpoint)
 
-        set_job(db, job["id"], status="processing")
-        current = {"status": "processing"}
 
-        def on_progress(message):
-            # Writing a step to the job lets the app show transcribing vs summarizing.
-            status = "summarizing" if message.startswith(("Writing", "Saving")) else "transcribing"
-            if status != current["status"]:
-                current["status"] = status
-                set_job(db, job["id"], status=status, message=None)
+def process_bot_recording(db, job, checkpoint):
+    if not checkpoint.audio.exists() or repair_wav(checkpoint.audio) < 10_000:
+        raise RuntimeError("No usable audio was captured. Send the bot again; the meeting was not rejoined automatically.")
+    set_job(db, job["id"], status="processing", message="Processing the saved recording")
 
-        result = process_uploaded_recording(
-            wav_path.read_bytes(),
-            "bot-recording.wav",
-            consent_confirmed=True,
-            owner_id=job["user_id"],
-            owner_email=job.get("user_email"),
-            progress=on_progress,
-        )
+    def on_progress(message):
+        status = "summarizing" if message.startswith(("Writing", "Saving")) else "transcribing"
+        set_job(db, job["id"], status=status, message=message)
 
-    saved = next(
-        (m for m in MeetingHistory().list_meetings(limit=50) if m["meeting_id"] == result["meeting_id"]),
-        None,
+    result = process_uploaded_recording(
+        checkpoint.audio.read_bytes(), "bot-recording.wav", consent_confirmed=True,
+        owner_id=job["user_id"], owner_email=job.get("user_email"), progress=on_progress,
     )
+    checkpoint.write(stage="saving", result=result)
+    finish_job(db, job, checkpoint)
+
+
+def finish_job(db, job, checkpoint):
+    state = checkpoint.read()
+    result = state["result"]
+    saved = MeetingHistory().get_meeting(result["meeting_id"])
     if not saved:
         raise RuntimeError("The meeting was processed but could not be found in history.")
     auth_db.save_meeting_from_history(
         db, saved, owner_email=job.get("user_email"), user_id=job["user_id"]
     )
-    set_job(db, job["id"], status="done", meeting_id=result["meeting_id"],
-            message=result.get("error"))
+    setter = set_job if checkpoint.table == meeting_bot.JOBS_TABLE else set_audio_job
+    message = " ".join(filter(None, [state.get("warning"), result.get("error")])) or None
+    setter(db, job["id"], status="done", meeting_id=result["meeting_id"], message=message)
+    if checkpoint.table == AUDIO_TABLE:
+        remove_uploaded_audio(db, job)
+    checkpoint.cleanup()
 
 
 def convert_to_wav(source, target):
@@ -617,7 +653,13 @@ def convert_to_wav(source, target):
 
 def run_audio_job(db, job):
     """Transcribe a recording uploaded from the mobile app or streamed in chunks by the browser."""
-    set_audio_job(db, job["id"], status="processing")
+    claimed = db.table(AUDIO_TABLE).update({
+        "status": "processing", "updated_at": datetime.now(UTC).isoformat(),
+    }).eq("id", job["id"]).eq("status", "queued").execute().data
+    if not claimed:
+        return
+    checkpoint = Checkpoint(RECOVERY_DIR, AUDIO_TABLE, job["id"])
+    checkpoint.write(stage="processing")
     chunked = bool(job.get("chunked"))
     with tempfile.TemporaryDirectory() as temp_dir:
         raw_path = Path(temp_dir) / "upload"
@@ -643,18 +685,15 @@ def run_audio_job(db, job):
             language=job.get("language") or None,
             progress=lambda step: _audio_step(db, job["id"], step),
         )
-    saved = next(
-        (m for m in MeetingHistory().list_meetings(limit=50) if m["meeting_id"] == result["meeting_id"]),
-        None,
-    )
-    if not saved:
-        raise RuntimeError("The recording was processed but could not be found in history.")
-    auth_db.save_meeting_from_history(db, saved, owner_email=job.get("user_email"), user_id=job["user_id"])
-    set_audio_job(db, job["id"], status="done", meeting_id=result["meeting_id"], message=result.get("error"))
+    checkpoint.write(stage="saving", result=result)
+    finish_job(db, job, checkpoint)
+
+
+def remove_uploaded_audio(db, job):
     try:
         paths = (
             [f"{job['storage_path']}/{c['name']}" for c in chunked_audio.list_chunks(db, job["storage_path"])]
-            if chunked
+            if job.get("chunked")
             else [job["storage_path"]]
         )
         db.storage.from_(AUDIO_BUCKET).remove(paths)  # keep no audio after transcription
@@ -736,8 +775,51 @@ def poll_calendar(db, stop):
             break
 
 
+def recover_jobs(db):
+    """Recover only jobs journaled by this host, while holding its OS lock."""
+    RECOVERY_DIR.mkdir(parents=True, exist_ok=True)
+    for path in sorted(RECOVERY_DIR.glob("*.json")):
+        checkpoint = job = None
+        try:
+            state = json.loads(path.read_text(encoding="utf-8"))
+            checkpoint = Checkpoint(RECOVERY_DIR, state["table"], state["job_id"])
+            if checkpoint.path != path:
+                raise ValueError("Checkpoint filename does not match its job")
+            rows = db.table(checkpoint.table).select("*").eq("id", checkpoint.job_id).limit(1).execute().data
+            if not rows or rows[0]["status"] in {"done", "cancelled"}:
+                if rows and rows[0]["status"] == "done" and checkpoint.table == AUDIO_TABLE:
+                    remove_uploaded_audio(db, rows[0])
+                checkpoint.cleanup()
+                continue
+            job = rows[0]
+            if state.get("attempts", 0) >= MAX_RECOVERY_ATTEMPTS:
+                setter = set_job if checkpoint.table == meeting_bot.JOBS_TABLE else set_audio_job
+                setter(db, job["id"], status="failed", message="Recovery retry limit reached. Saved audio is retained on the worker for manual recovery.")
+                continue
+            checkpoint.write(attempts=state.get("attempts", 0) + 1)
+            if state.get("stage") == "saving":
+                finish_job(db, job, checkpoint)
+            elif checkpoint.table == AUDIO_TABLE:
+                set_audio_job(db, job["id"], status="queued", message="Worker restarted; retrying the stored recording")
+            elif checkpoint.audio.exists() and checkpoint.audio.stat().st_size > 44:
+                checkpoint.write(stage="processing", warning="Worker restarted. Recovered the captured portion; audio during the interruption is unavailable.")
+                process_bot_recording(db, job, checkpoint)
+            else:
+                set_job(db, job["id"], status="failed", message="Worker restarted before audio was captured. Send the bot again to join the meeting.")
+                checkpoint.cleanup()
+        except Exception:
+            logging.getLogger(__name__).exception("Could not recover checkpoint %s; retained for the next restart", path.name)
+            if checkpoint and job:
+                try:
+                    setter = set_job if checkpoint.table == meeting_bot.JOBS_TABLE else set_audio_job
+                    setter(db, job["id"], status="failed", message="Recovery could not finish. Saved audio is retained; restart the worker to retry.")
+                except Exception:
+                    logging.getLogger(__name__).exception("Could not publish recovery failure for %s", path.name)
+
+
 def worker_loop(db):
     print(f"Bot worker running (headless={HEADLESS}). Waiting for jobs...")
+    recover_jobs(db)
     while True:
         poll_recording_jobs(db)
         if poll_audio_jobs(db):
@@ -770,6 +852,11 @@ def worker_loop(db):
 
 
 def main():
+    with worker_lock(RECOVERY_DIR):
+        run_worker()
+
+
+def run_worker():
     db = service_client()
     # A separate client avoids sharing an HTTP client across the two threads.
     calendar_db = service_client()

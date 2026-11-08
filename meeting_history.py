@@ -213,6 +213,11 @@ class MeetingHistory:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def get_meeting(self, meeting_id):
+        with self._connection() as connection:
+            row = connection.execute("SELECT * FROM meetings WHERE meeting_id = ?", (meeting_id,)).fetchone()
+        return dict(row) if row else None
+
     def list_meetings(self, limit=20, owner_id=None):
         owner_filter = "WHERE owner_id = ?" if owner_id else ""
         params = ([owner_id] if owner_id else []) + [max(1, int(limit))]
