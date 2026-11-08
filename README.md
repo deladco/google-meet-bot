@@ -61,6 +61,14 @@ Never commit `.env`, OAuth credentials, tokens, virtual environments, databases,
 
 ## Worker recording health and restart recovery
 
+### Dashboard worker availability
+
+Apply `supabase/migrations/20261108151435_worker_availability.sql` once in the Supabase SQL Editor, then restart the worker with the updated code. This adds the `worker_heartbeats` table. The repository's older SQL scripts are applied separately; this migration contains only the availability feature.
+
+The dashboard refreshes worker availability every 15 seconds. Each worker sends a heartbeat every 20 seconds, independently of recording, transcription, recovery, and calendar polling. A heartbeat older than 90 seconds is treated as offline; graceful shutdown marks the worker offline immediately. The panel shows online/offline status, whether a worker is free or busy, current activity, and the latest heartbeat. An offline warning means scheduled meetings cannot be joined until a worker starts. Busy workers continue to queue work.
+
+The shared heartbeat contains only an opaque worker ID, a timestamp, and generic activity. It exposes no meeting URLs, job IDs, user identities, or host names. Signed-in users can read status; only the worker's service role can write it. If the migration is missing or the status query fails, the dashboard reports availability as unknown rather than claiming the worker is offline.
+
 The meeting worker checks capture health every few seconds. It warns in the dashboard after 60 seconds of near-silence and clears the warning when sound returns. Silence alone does not end the meeting. If capture stops producing data for 20 seconds, the capture process fails, or the browser disconnects, the worker stops recording and processes the captured portion. The completed job retains a partial-recording warning.
 
 Bot recordings and job checkpoints now live under `output/worker_recovery`, configurable with `BOT_RECOVERY_DIR`. Keep that directory, the meeting SQLite database (`MEETING_DB_PATH`), and generated transcripts/notes on persistent storage. For a container worker, mount persistent volumes at `/app/output` and `/app/data`, set `MEETING_DB_PATH=/app/data/meeting_history.sqlite3`, and keep the same volumes when replacing the container. Deleting those volumes loses local recovery data.

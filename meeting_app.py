@@ -18,6 +18,7 @@ import meeting_bot
 import minutes_store
 import note_feedback
 import rag
+import worker_availability
 from ai_agent import load_transcript
 from live_recorder import live_recorder
 from meeting_history import MeetingHistory
@@ -1108,12 +1109,43 @@ def agenda_section(meetings):
                                 st.error(f"Could not queue the bot: {error}")
             st.divider()
 
+@st.fragment(run_every="15s")
+def worker_availability_section():
+    if not auth_db.is_configured() or not st.session_state.get("supabase_user"):
+        return
+    with st.container(border=True):
+        st.markdown("**Meeting worker**")
+        try:
+            status = worker_availability.read_status(auth_db.client_for_user())
+        except Exception:
+            logging.getLogger(__name__).debug("Could not read worker availability", exc_info=True)
+            st.warning("Worker status is unavailable. Availability cannot be confirmed; please contact the administrator.")
+            return
+        online, available = status["online"], status["available"]
+        if not online:
+            st.warning("Worker offline — no worker is available to join scheduled meetings or process recordings. Start the meeting worker.")
+        elif available:
+            st.success(f"Worker online · {len(available)} available", icon=":material/check_circle:")
+        else:
+            st.info("Worker online · busy. New meetings and recordings will wait until a worker is free.")
+        if online:
+            activities = sorted({worker_availability.ACTIVITY_LABELS[row["activity"]] for row in online})
+            st.caption("Current activity: " + "; ".join(activities))
+        seen = status["last_seen"]
+        if seen:
+            seconds = max(0, int((datetime.now(UTC) - seen).total_seconds()))
+            st.caption(f"Last heartbeat: {seconds}s ago · {seen.strftime('%d %b %Y, %H:%M:%S UTC')}")
+        else:
+            st.caption("No worker heartbeat received yet.")
+
+
 def dashboard_page():
     meetings = load_meetings()
     actions = [a for m in meetings for a in minutes_list(m, "action_items")]
     hours = sum(meeting_duration_hours(m) for m in meetings)
 
     st.title("Chief Communication Officer")
+    worker_availability_section()
     agenda_section(meetings)
     with st.container(border=True, key="new_meeting"):
         st.subheader("Start a new meeting", anchor=False)

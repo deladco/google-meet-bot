@@ -34,6 +34,7 @@ import auth_db
 import calendar_sync
 import chunked_audio
 import meeting_bot
+import worker_availability
 from live_captions import LiveCaptions
 from meeting_history import MeetingHistory
 from remote_workflow import process_uploaded_recording
@@ -83,11 +84,13 @@ def service_client():
 def set_job(db, job_id, **fields):
     fields["updated_at"] = datetime.now(UTC).isoformat()
     db.table(meeting_bot.JOBS_TABLE).update(fields).eq("id", job_id).execute()
+    worker_availability.ACTIVITY.update_job(meeting_bot.JOBS_TABLE, job_id, fields.get("status"))
 
 
 def set_audio_job(db, job_id, **fields):
     fields["updated_at"] = datetime.now(UTC).isoformat()
     db.table(AUDIO_TABLE).update(fields).eq("id", job_id).execute()
+    worker_availability.ACTIVITY.update_job(AUDIO_TABLE, job_id, fields.get("status"))
 
 
 def _audio_step(db, job_id, step):
@@ -578,6 +581,7 @@ def record_meeting(db, job, wav_path):
                 logging.getLogger(__name__).debug("Handled error in record_meeting", exc_info=True)
 
 
+@worker_availability.track_job("bot_jobs")
 def run_job(db, job):
     # Claim only a still-queued job. A cancellation or another worker may have
     # changed it since the queue was read.
@@ -603,6 +607,7 @@ def run_job(db, job):
     process_bot_recording(db, job, checkpoint)
 
 
+@worker_availability.track_job("bot_jobs")
 def process_bot_recording(db, job, checkpoint):
     if not checkpoint.audio.exists() or repair_wav(checkpoint.audio) < 10_000:
         raise RuntimeError("No usable audio was captured. Send the bot again; the meeting was not rejoined automatically.")
@@ -651,6 +656,7 @@ def convert_to_wav(source, target):
         out.writeframes(pcm.tobytes())
 
 
+@worker_availability.track_job("audio_jobs")
 def run_audio_job(db, job):
     """Transcribe a recording uploaded from the mobile app or streamed in chunks by the browser."""
     claimed = db.table(AUDIO_TABLE).update({
@@ -819,7 +825,8 @@ def recover_jobs(db):
 
 def worker_loop(db):
     print(f"Bot worker running (headless={HEADLESS}). Waiting for jobs...")
-    recover_jobs(db)
+    with worker_availability.ACTIVITY.working("recovering"):
+        recover_jobs(db)
     while True:
         poll_recording_jobs(db)
         if poll_audio_jobs(db):
@@ -860,14 +867,21 @@ def run_worker():
     db = service_client()
     # A separate client avoids sharing an HTTP client across the two threads.
     calendar_db = service_client()
+    heartbeat_db = service_client()
     stop = threading.Event()
     calendar_thread = threading.Thread(target=poll_calendar, args=(calendar_db, stop), daemon=True)
+    heartbeat_thread = threading.Thread(
+        target=worker_availability.heartbeat_loop,
+        args=(heartbeat_db, stop, worker_availability.worker_id(RECOVERY_DIR)), daemon=True,
+    )
     calendar_thread.start()
+    heartbeat_thread.start()
     try:
         worker_loop(db)
     finally:
         stop.set()
         calendar_thread.join(timeout=5)
+        heartbeat_thread.join(timeout=5)
 
 
 if __name__ == "__main__":

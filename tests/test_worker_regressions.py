@@ -90,9 +90,10 @@ def test_only_first_worker_claims_job(monkeypatch):
 def test_calendar_continues_while_worker_is_busy_and_survives_errors(monkeypatch):
     polled = threading.Event()
     calls = []
-    clients = iter([object(), object()])
+    clients = iter([object(), object(), object()])
     monkeypatch.setattr(bw, "service_client", lambda: next(clients))
     monkeypatch.setattr(bw, "CALENDAR_SYNC_SECONDS", 0.01)
+    monkeypatch.setattr(bw.worker_availability, "heartbeat_loop", lambda db, stop, identity: stop.wait(2))
 
     def sync(db):
         calls.append(db)
