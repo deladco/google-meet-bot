@@ -94,6 +94,9 @@ def apply_edits(minutes, summary, decisions_text, actions):
         if not task or row.get("remove"):
             continue
         base = copy.deepcopy(old_actions.get(row.get("id"))) or {"id": uuid.uuid4().hex[:10], "status": "open"}
+        if task != base.get("task"):
+            base.pop("transcript_refs", None)
+            base.pop("refs", None)
         base["task"] = task
         base["owner"] = (row.get("owner") or "").strip() or "Not specified"
         base["deadline"] = (row.get("deadline") or "").strip() or "Not specified"
@@ -101,6 +104,8 @@ def apply_edits(minutes, summary, decisions_text, actions):
             guessed = parse_due(base["deadline"])
             if guessed:
                 base["due"] = guessed.isoformat()
+            else:
+                base.pop("due", None)
         items.append(base)
     updated["action_items"] = items
     updated["review"] = {"status": "draft", "edited": True, "edited_at": now_iso()}
@@ -125,7 +130,10 @@ def set_task(minutes, task_id, **fields):
             else:
                 item.pop("due", None)
         if "owner" in fields:
-            item["owner"] = (fields["owner"] or "").strip() or "Not specified"
+            owner = (fields["owner"] or "").strip() or "Not specified"
+            if owner != item.get("owner"):
+                minutes["review"] = {"status": "draft", "edited": True, "edited_at": now_iso()}
+            item["owner"] = owner
         if "project" in fields:
             project = clean_project(fields["project"])
             if project:
@@ -250,6 +258,7 @@ def task_rows(meetings):
                     "deadline": item.get("deadline") or "Not specified",
                     "due": parse_due(item.get("due")),
                     "done": item.get("status") == "done",
+                    "approved": is_approved(minutes),
                     "project": clean_project(item.get("project")) or meeting_project(meeting),
                     "refs": item.get("transcript_refs") or [],
                     "meeting": meeting,

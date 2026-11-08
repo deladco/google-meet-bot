@@ -130,7 +130,7 @@ def _references(segment_indices, entries):
 	references = []
 	seen = set()
 	for index in segment_indices:
-		if not isinstance(index, int) or index < 0 or index >= len(entries) or index in seen:
+		if type(index) is not int or index < 0 or index >= len(entries) or index in seen:
 			continue
 		seen.add(index)
 		entry = entries[index]

@@ -97,6 +97,14 @@ For isolated PostgreSQL verification without touching the hosted database, run `
 
 ## Transcription quality
 
+### Review speakers and evidence
+
+Open a cloud-saved meeting and expand **Correct speaker names**. Saving a name updates all matching transcript labels, summary/item source attributions, and exact action-owner matches together, regenerates Markdown notes, and reopens approval as a draft. Original diarization labels remain in the transcript's `original_speaker` field. Speaker renames do not replace free text in summaries or tasks; the review checklist flags old names still present in that text. `Unknown` may represent multiple people, so only give that group one name when the lines actually belong to the same person.
+
+Use **Read full transcript sources** below a summary, decision, or task to inspect its timestamped evidence and adjacent transcript lines. The review checklist identifies generic speaker labels, missing/invalid references, quotes or attributions inconsistent with the current transcript, unclear owners, and deadlines needing confirmation. These are evidence checks, not model confidence estimates or a guarantee of factual correctness. Approving flagged minutes requires explicitly confirming that you reviewed the checklist; unstated owners/deadlines may remain unspecified.
+
+Changing a task's text removes its old citations; replacing a dated deadline with an unspecified value removes its old due date. Changing a task owner reopens approved minutes as draft. The task board labels tasks from unapproved minutes as drafts. This review flow uses existing transcript and minutes JSON fields; no migration is required. Speaker editing currently requires the signed-in owner's cloud copy; local-only transcripts remain readable and downloadable.
+
 On an NVIDIA GPU the worker uses Whisper large-v3-turbo (CPU hosts: small), detects the language per segment, cleans the audio (high-pass, plus noise reduction if `noisereduce` is installed), biases Whisper toward your vocabulary, and runs an Ollama pass that fixes obvious misspellings. Tune it with the optional variables in `.env.example` (`WHISPER_MODEL`, `WHISPER_LANGUAGE`, `WHISPER_VOCABULARY` / `vocabulary.txt`, `AUDIO_CLEANUP`, `TRANSCRIPT_LLM_CORRECTION`). GPU hosts also need `nvidia-cublas-cu12 nvidia-cudnn-cu12` and a CUDA build of torch for fast speaker labelling.
 
 Vocabulary is learned automatically: after each meeting, names and terms found in the transcript become candidates (`vocabulary_candidates.json`) and are promoted to `vocabulary_learned.txt` once they appear in two different meetings. Edit that file freely, or move good terms into `vocabulary.txt`.

@@ -1,4 +1,5 @@
 import csv
+import hashlib
 import hmac
 import io
 import json
@@ -20,6 +21,7 @@ import meeting_notifications
 import minutes_store
 import note_feedback
 import rag
+import transcript_review
 import worker_availability
 from ai_agent import load_transcript
 from live_recorder import live_recorder
@@ -1513,10 +1515,25 @@ def meetings_page():
         meeting_card(meeting, "list")
 
 
-def sources_caption(item):
+def sources_caption(item, entries=None):
     lines = minutes_store.source_text(item)
     if lines:
         st.caption(":material/schedule: " + "  \n".join(lines))
+        with st.expander("Read full transcript sources"):
+            seen = set()
+            for ref in item.get("transcript_refs") or item.get("refs") or []:
+                index = ref.get("segment_index")
+                if entries is not None and type(index) is int and 0 <= index < len(entries):
+                    for position in range(max(0, index - 1), min(len(entries), index + 2)):
+                        if position in seen:
+                            continue
+                        seen.add(position)
+                        entry = entries[position]
+                        st.caption(f"{minutes_store.ref_time(entry)} · {entry.get('speaker', 'Unknown')} · segment {position}")
+                        st.write(entry.get("text", ""))
+                else:
+                    st.caption(f"{minutes_store.ref_time(ref)} · {ref.get('speaker', 'Unknown')}")
+                    st.write(ref.get("quote", ""))
 
 
 def persist_minutes(meeting, minutes, message):
@@ -1532,6 +1549,8 @@ def persist_minutes(meeting, minutes, message):
 
 def show_minutes(meeting):
     minutes = meeting["minutes"]
+    entries = parse_transcript(meeting["transcript"])
+    issues = transcript_review.review_issues(minutes, entries)
     cloud = meeting["source"] == "cloud"
     approved = minutes_store.is_approved(minutes)
     info = minutes_store.review(minutes)
@@ -1546,6 +1565,18 @@ def show_minutes(meeting):
             "then approve.",
             icon=":material/edit_note:",
         )
+    acknowledged = not issues
+    if issues:
+        with st.expander(f"Review checklist ({len(issues)})", expanded=not approved):
+            st.caption("These checks flag missing or inconsistent evidence; they do not verify that every statement is true.")
+            for issue in issues:
+                st.write("• " + issue)
+            if not approved and cloud:
+                revision = hashlib.sha256(json.dumps([minutes, entries], sort_keys=True).encode()).hexdigest()[:12]
+                acknowledged = st.checkbox(
+                    "I checked these items against the transcript. Unstated owners or deadlines can remain unspecified.",
+                    key=f"review_checked_{meeting['id']}_{revision}",
+                )
     if cloud:
         project_column, _spacer = st.columns(2)
         with project_column.popover(
@@ -1557,7 +1588,8 @@ def show_minutes(meeting):
             st.session_state[f"editing_{meeting['id']}"] = True
             st.rerun()
         if not approved and approve_column.button(
-            "Approve notes", icon=":material/verified:", type="primary", width="stretch", key=f"approve_{meeting['id']}"
+            "Approve notes", icon=":material/verified:", type="primary", width="stretch", key=f"approve_{meeting['id']}",
+            disabled=not acknowledged,
         ):
             minutes_store.approve(minutes, by=viewer_email)
             if persist_minutes(meeting, minutes, "Notes approved"):
@@ -1571,8 +1603,7 @@ def show_minutes(meeting):
 
     st.subheader("Summary")
     st.write(minutes.get("summary") or "No summary available.")
-    for line in minutes_store.source_text({"transcript_refs": minutes.get("summary_refs")}, limit=1):
-        st.caption(f":material/schedule: {line}")
+    sources_caption({"transcript_refs": minutes.get("summary_refs")}, entries)
 
     decisions = minutes_list(meeting, "decisions")
     st.subheader(f"Decisions ({len(decisions)})")
@@ -1580,7 +1611,7 @@ def show_minutes(meeting):
         for decision in decisions:
             with st.container(border=True):
                 st.markdown(decision.get("decision", ""))
-                sources_caption(decision)
+                sources_caption(decision, entries)
     else:
         st.caption("No decisions were recorded.")
 
@@ -1598,7 +1629,9 @@ def show_minutes(meeting):
                     + (f" · Due {due.strftime('%d %b %Y')}" if due else "")
                     + (" · Done" if done else "")
                 )
-                sources_caption(item)
+                for issue in transcript_review.action_issues(item, entries):
+                    st.caption(":material/fact_check: " + issue)
+                sources_caption(item, entries)
         st.page_link(PAGE_ACTIONS, label="Track these on the task board", icon=":material/checklist:")
     else:
         st.caption("No action items were captured.")
@@ -1667,6 +1700,46 @@ def edit_minutes_form(meeting):
             st.rerun()
 
 
+def speaker_review_form(meeting, entries):
+    if not entries:
+        return
+    with st.expander("Correct speaker names", icon=":material/groups:"):
+        if meeting["source"] != "cloud":
+            st.caption("Speaker corrections require a cloud-saved copy of the meeting.")
+            return
+        speakers = sorted({str(entry.get("speaker") or "Unknown") for entry in entries})
+        st.caption(
+            "Names apply to every matching transcript label, source attribution, and exact task-owner match. "
+            "Check names mentioned in the summary or task text separately. Saving reopens minutes as a draft."
+        )
+        if "Unknown" in speakers:
+            st.warning("Unknown may contain several people. Rename it only if those lines belong to the same person.")
+        with st.form(f"speaker_names_{meeting['id']}"):
+            names = {
+                speaker: st.text_input(
+                    f"Name for {speaker}", value=speaker, max_chars=100,
+                    key=f"speaker_name_{meeting['id']}_{speaker}",
+                ) for speaker in speakers
+            }
+            saved = st.form_submit_button("Save speaker names", type="primary")
+        if saved:
+            try:
+                updated_entries, minutes = transcript_review.rename_speakers(entries, meeting.get("minutes"), names)
+                if updated_entries == entries:
+                    st.info("No speaker names changed.")
+                    return
+                entries = updated_entries
+                transcript_review.save_speakers(auth_db.client_for_user(), meeting, entries, minutes, st.session_state.get("user_id"))
+            except Exception as error:
+                logging.getLogger(__name__).debug("Could not save speaker corrections", exc_info=True)
+                st.error(f"Could not save speaker names: {error}")
+            else:
+                st.session_state.pop(f"speakers_{meeting['id']}", None)
+                refresh_meetings()
+                st.toast("Speaker names saved. Review the updated draft before approving.")
+                st.rerun()
+
+
 def show_meeting(meeting):
     st.header(meeting_title(meeting))
     st.caption(
@@ -1677,6 +1750,8 @@ def show_meeting(meeting):
     if meeting["error"]:
         st.warning(meeting["error"])
 
+    entries = parse_transcript(meeting["transcript"])
+    speaker_review_form(meeting, entries)
     minutes = meeting["minutes"]
     if not minutes:
         st.info("A summary has not been generated for this meeting yet.")
@@ -1856,6 +1931,8 @@ def task_card(row, today, project_names):
         )
         project_tag = f"{row['project']} · " if row["project"] else ""
         st.caption(f"{project_tag}{row['owner']} · {due_label(row, today)} · {meeting_title(meeting)}")
+        if not row.get("approved"):
+            st.caption(":material/edit_note: Draft task — meeting minutes have not been approved.")
         options = [NO_PROJECT, *project_names]
         project_key = f"project_{base}_{row['project']}"
         st.selectbox(
