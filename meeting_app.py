@@ -2,9 +2,10 @@ import csv
 import hmac
 import io
 import json
+import logging
 import os
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import streamlit as st
@@ -13,7 +14,13 @@ from dotenv import load_dotenv
 import auth_db
 import calendar_sync
 import google_calendar
+import meeting_bot
+import minutes_store
+import note_feedback
+import rag
 from ai_agent import load_transcript
+from live_recorder import live_recorder
+from meeting_history import MeetingHistory
 from remote_config import (
     CLOUD_OLLAMA_HOST,
     LOCAL_OLLAMA_HOST,
@@ -21,13 +28,7 @@ from remote_config import (
     get_ollama_host,
     get_setting,
 )
-from meeting_history import MeetingHistory
 from remote_workflow import process_uploaded_recording
-import meeting_bot
-import minutes_store
-import note_feedback
-import rag
-from live_recorder import live_recorder
 from transcript_quality import LEARNED_FILE, vocabulary
 
 PROJECT_DIR = Path(__file__).resolve().parent
@@ -150,6 +151,7 @@ def _login_forms(client, sign_in_tab, sign_up_tab):
             try:
                 auth_db.save_login(auth_db.sign_in(client, email, password))
             except Exception as error:
+                logging.getLogger(__name__).debug("Handled error in _login_forms", exc_info=True)
                 st.error(f"Sign in failed: {error}")
             else:
                 st.rerun()
@@ -160,6 +162,7 @@ def _login_forms(client, sign_in_tab, sign_up_tab):
             try:
                 response = auth_db.sign_up(client, new_email, new_password)
             except Exception as error:
+                logging.getLogger(__name__).debug("Handled error in _login_forms", exc_info=True)
                 st.error(f"Sign up failed: {error}")
             else:
                 if response.session:
@@ -194,11 +197,11 @@ history = MeetingHistory()
 
 def parse_when(value):
     try:
-        moment = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        moment = datetime.fromisoformat(str(value))
     except ValueError:
         return None
     if moment.tzinfo is None:
-        moment = moment.replace(tzinfo=timezone.utc)
+        moment = moment.replace(tzinfo=UTC)
     return moment.astimezone()
 
 
@@ -289,6 +292,7 @@ def load_meetings(force=False):
             auth_db.sign_out()
             st.rerun()
         except Exception as error:
+            logging.getLogger(__name__).debug("Handled error in load_meetings", exc_info=True)
             st.warning(f"Could not load cloud meetings: {error}")
             rows = []
         for row in rows:
@@ -298,7 +302,7 @@ def load_meetings(force=False):
         if meeting["meeting_id"] not in seen:
             items.append(normalize_local(meeting))
     items.sort(
-        key=lambda item: (parse_when(item["recorded_at"]) or datetime.min.replace(tzinfo=timezone.utc)),
+        key=lambda item: (parse_when(item["recorded_at"]) or datetime.min.replace(tzinfo=UTC)),
         reverse=True,
     )
     st.session_state["meetings_cache"] = (time.time(), items)
@@ -389,7 +393,7 @@ def queue_recording(audio_bytes, filename, consent):
     if not (consent and auth_db.is_configured() and st.session_state.get("supabase_user") and viewer_id):
         return None
     suffix = Path(filename).suffix.casefold() or ".wav"
-    path = f"{viewer_id}/{datetime.now(timezone.utc):%Y%m%d_%H%M%S}_{os.urandom(4).hex()}{suffix}"
+    path = f"{viewer_id}/{datetime.now(UTC):%Y%m%d_%H%M%S}_{os.urandom(4).hex()}{suffix}"
     try:
         db = auth_db.client_for_user()
         db.storage.from_("recordings").upload(
@@ -411,6 +415,7 @@ def queue_recording(audio_bytes, filename, consent):
         )
         return row[0]["id"]
     except Exception:
+        logging.getLogger(__name__).debug("Handled error in queue_recording", exc_info=True)
         return None  # migration not run or storage unreachable: fall back to local processing
 
 
@@ -445,6 +450,7 @@ def audio_job_status():
     try:
         rows = auth_db.client_for_user().table("audio_jobs").select("*").eq("id", job_id).limit(1).execute().data
     except Exception as error:
+        logging.getLogger(__name__).debug("Handled error in audio_job_status", exc_info=True)
         st.warning(f"Could not check the recording status: {error}")
         return
     job = rows[0] if rows else None
@@ -526,6 +532,7 @@ def live_recording_section(source, consent):
                     audio_bytes, f"{source}-recording.{extension}", consent
                 )
             except Exception as error:
+                logging.getLogger(__name__).debug("Handled error in section", exc_info=True)
                 st.error(f"Meeting processing failed: {error}")
         audio_job_status()
         if st.session_state.get("last_recording_result"):
@@ -553,6 +560,7 @@ def save_to_cloud(result):
             )
             result["saved_to_cloud"] = True
     except Exception as error:
+        logging.getLogger(__name__).debug("Handled error in save_to_cloud", exc_info=True)
         st.warning(f"Could not save this meeting to the cloud: {error}")
 
 
@@ -567,6 +575,7 @@ def show_saved_transcript(result):
                 for entry in load_transcript(transcript_path):
                     st.write(f"**{entry.get('speaker', 'Unknown')}**: {entry.get('text', '')}")
             except Exception:
+                logging.getLogger(__name__).debug("Handled error in show_saved_transcript", exc_info=True)
                 st.code(transcript_text)
         st.download_button(
             "Download transcript (.jsonl)",
@@ -657,6 +666,7 @@ def render_bot_status():
             st.rerun(scope="fragment")
         return True
     except Exception as error:
+        logging.getLogger(__name__).debug("Handled error in render_bot_status", exc_info=True)
         st.error(f"Bot error: {error}")
         return False
 
@@ -751,6 +761,7 @@ def new_meeting_section():
                         auth_db.client_for_user(), bot_url, bot_name, viewer_email
                     )
                 except Exception as error:
+                    logging.getLogger(__name__).debug("Handled error in new_meeting_section", exc_info=True)
                     st.error(f"Could not queue the bot: {error}")
         bot_status_panel()
     elif audio_source == "Tabs / system audio + microphone":
@@ -784,6 +795,7 @@ def new_meeting_section():
                 if result:
                     show_processing_result(result)
             except Exception as error:
+                logging.getLogger(__name__).debug("Handled error in new_meeting_section", exc_info=True)
                 st.error(f"Meeting processing failed: {error}")
         audio_job_panel()
 
@@ -841,6 +853,7 @@ def load_projects():
         try:
             st.session_state["projects"] = auth_db.get_projects(auth_db.client_for_user())
         except Exception:
+            logging.getLogger(__name__).debug("Handled error in load_projects", exc_info=True)
             st.session_state["projects"] = []
     return st.session_state["projects"]
 
@@ -851,6 +864,7 @@ def store_projects(names):
         st.session_state["projects"] = names
         st.session_state.pop("task_error", None)
     except Exception as error:
+        logging.getLogger(__name__).debug("Handled error in store_projects", exc_info=True)
         st.session_state["task_error"] = f"Could not save projects: {error}"
 
 
@@ -864,6 +878,7 @@ def delete_project(name):
                     auth_db.client_for_user(), meeting, meeting["minutes"], user_id=st.session_state.get("user_id")
                 )
     except Exception as error:
+        logging.getLogger(__name__).debug("Handled error in delete_project", exc_info=True)
         st.session_state["task_error"] = f"Could not update tasks: {error}"
         return
     store_projects([n for n in load_projects() if n.casefold() != name.casefold()])
@@ -886,6 +901,7 @@ def rename_project(old, new):
                     auth_db.client_for_user(), meeting, meeting["minutes"], user_id=st.session_state.get("user_id")
                 )
     except Exception as error:
+        logging.getLogger(__name__).debug("Handled error in rename_project", exc_info=True)
         st.session_state["task_error"] = f"Could not update tasks: {error}"
         return False
     store_projects(minutes_store.renamed_list(names, old, new))
@@ -935,11 +951,13 @@ def projects_section(meetings):
                     if name != UNASSIGNED and counts["meetings"]:
                         with st.popover("Meetings", icon=":material/event_note:", width="stretch"):
                             for meeting in meetings:
-                                if minutes_store.meeting_project(meeting).casefold() == name.casefold():
-                                    if st.button(
+                                if (
+                                    minutes_store.meeting_project(meeting).casefold() == name.casefold()
+                                    and st.button(
                                         meeting_title(meeting), key=f"proj_mtg_{name}_{meeting['id']}", type="tertiary"
-                                    ):
-                                        open_meeting(meeting["id"])
+                                    )
+                                ):
+                                    open_meeting(meeting["id"])
                     if st.button("Open tasks", key=f"open_project_{name}", type="tertiary", icon=":material/arrow_forward:"):
                         open_task_board(name)
         add_project_form("add_project_dashboard")
@@ -952,9 +970,8 @@ def projects_section(meetings):
                     )
                     if rename_column.button(
                         "Rename", key=f"rename_project_{name}", disabled=not new_name.strip() or new_name.strip() == name
-                    ):
-                        if rename_project(name, new_name):
-                            st.rerun()
+                    ) and rename_project(name, new_name):
+                        st.rerun()
                     if delete_column.button("Delete", key=f"delete_project_{name}", icon=":material/delete:"):
                         delete_project(name)
                         st.rerun()
@@ -976,10 +993,11 @@ def calendar_agenda(force=False):
             rows = auth_db.client_for_user().table(calendar_sync.FEEDS_TABLE).select("*").limit(1).execute().data
             feed = rows[0] if rows else None
             if feed and (feed.get("google_refresh_token") or feed.get("ics_url")):
-                now = datetime.now(timezone.utc)
+                now = datetime.now(UTC)
                 result["feed"] = feed
                 result["events"] = calendar_sync.feed_events(feed, now - timedelta(hours=12), now + timedelta(days=7))
         except Exception as error:
+            logging.getLogger(__name__).debug("Handled error in calendar_agenda", exc_info=True)
             result["error"] = str(error)
     st.session_state["calendar_agenda"] = result
     return result
@@ -999,7 +1017,7 @@ def day_label(day):
 def agenda_section(meetings):
     agenda = calendar_agenda()
     today = datetime.now().astimezone().date()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     entries = {}
     used = set()
     for event in agenda["events"] or []:
@@ -1083,6 +1101,7 @@ def agenda_section(meetings):
                                 )
                                 st.toast("Bot queued. Admit it from the lobby if asked.")
                             except Exception as error:
+                                logging.getLogger(__name__).debug("Handled error in agenda_section", exc_info=True)
                                 st.error(f"Could not queue the bot: {error}")
             st.divider()
 
@@ -1196,16 +1215,19 @@ def meeting_card(meeting, key_prefix, show_open=True):
         title_column, project_column, pencil_column = st.columns([10, 1, 1], vertical_alignment="center", gap="small")
         title_column.markdown(f"**{meeting_title(meeting)}**")
         if can_assign:
-            with project_column.container(key=f"renamebtn_proj_{key_prefix}_{meeting['id']}"):
-                with st.popover("", icon=":material/folder:", help="Assign to a project"):
-                    project_picker(meeting, key_prefix)
-        with pencil_column.container(key=f"renamebtn_{key_prefix}_{meeting['id']}"):
-            with st.popover("", icon=":material/edit:", help="Rename meeting"):
-                with st.form(f"rename_form_{key_prefix}_{meeting['id']}", border=False):
-                    new_title = st.text_input("Meeting name", value=meeting_title(meeting), max_chars=120)
-                    if st.form_submit_button("Save name", type="primary", icon=":material/check:"):
-                        if rename_meeting(meeting, new_title):
-                            st.rerun()
+            with (
+                project_column.container(key=f"renamebtn_proj_{key_prefix}_{meeting['id']}"),
+                st.popover("", icon=":material/folder:", help="Assign to a project"),
+            ):
+                project_picker(meeting, key_prefix)
+        with (
+            pencil_column.container(key=f"renamebtn_{key_prefix}_{meeting['id']}"),
+            st.popover("", icon=":material/edit:", help="Rename meeting"),
+            st.form(f"rename_form_{key_prefix}_{meeting['id']}", border=False),
+        ):
+            new_title = st.text_input("Meeting name", value=meeting_title(meeting), max_chars=120)
+            if st.form_submit_button("Save name", type="primary", icon=":material/check:") and rename_meeting(meeting, new_title):
+                st.rerun()
         if meeting["minutes"]:
             detail = (
                 f"{len(minutes_list(meeting, 'decisions'))} decisions · "
@@ -1273,12 +1295,12 @@ def meetings_page():
 
     needle = query.strip().casefold()
     days = DATE_FILTERS[date_filter]
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days) if days else None
+    cutoff = datetime.now(UTC) - timedelta(days=days) if days else None
     filtered = [
         m
         for m in meetings
         if (status_filter == "All" or m["status"] == status_filter)
-        and (cutoff is None or (parse_when(m["recorded_at"]) or datetime.min.replace(tzinfo=timezone.utc)) >= cutoff)
+        and (cutoff is None or (parse_when(m["recorded_at"]) or datetime.min.replace(tzinfo=UTC)) >= cutoff)
         and (
             not needle
             or needle in meeting_title(m).casefold()
@@ -1312,6 +1334,7 @@ def persist_minutes(meeting, minutes, message):
     try:
         minutes_store.save_minutes(auth_db.client_for_user(), meeting, minutes, user_id=st.session_state.get("user_id"))
     except Exception as error:
+        logging.getLogger(__name__).debug("Handled error in persist_minutes", exc_info=True)
         st.error(f"Could not save: {error}")
         return False
     st.toast(message, icon=":material/check_circle:")
@@ -1446,7 +1469,8 @@ def edit_minutes_form(meeting):
             try:
                 note_feedback.record_edit(st.session_state.get("user_id"), minutes, updated)
             except Exception:
-                pass  # learning from edits must never block saving them
+                logging.getLogger(__name__).debug("Handled error in edit_minutes_form", exc_info=True)
+                # learning from edits must never block saving them
             for key in [k for k in st.session_state if str(k).endswith(f"_{mid}") or f"_{mid}_" in str(k)]:
                 if key.startswith(("et_", "eo_", "ed_", "er_", "nt_", "no_", "nd_")):
                     st.session_state.pop(key, None)
@@ -1573,6 +1597,7 @@ def chat_page():
                 with st.spinner("Searching your meetings..."):
                     answer, passages = answer_question(question)
             except Exception as error:
+                logging.getLogger(__name__).debug("Handled error in chat_page", exc_info=True)
                 answer, passages = friendly_error(error), []
                 st.error(answer)
             else:
@@ -1611,6 +1636,7 @@ def update_task(meeting_id, task_id, widget_key, field):
         )
         st.session_state.pop("task_error", None)
     except Exception as error:
+        logging.getLogger(__name__).debug("Handled error in update_task", exc_info=True)
         st.session_state["task_error"] = f"Could not save the change: {error}"
 
 
@@ -1740,7 +1766,7 @@ def actions_page():
     ]
     newest_first = sorted(
         shown,
-        key=lambda r: parse_when(r["meeting"]["recorded_at"]) or datetime.min.replace(tzinfo=timezone.utc),
+        key=lambda r: parse_when(r["meeting"]["recorded_at"]) or datetime.min.replace(tzinfo=UTC),
         reverse=True,
     )
     if sort_by == "Due date":
@@ -1814,6 +1840,7 @@ def handle_google_callback():
         ).execute()
         st.session_state["calendar_notice"] = ("success", "Google Calendar connected.")
     except Exception as error:
+        logging.getLogger(__name__).debug("Handled error in handle_google_callback", exc_info=True)
         st.session_state["calendar_notice"] = ("error", f"Could not connect Google Calendar: {error}")
     st.switch_page(PAGE_CALENDAR)
 
@@ -1828,6 +1855,7 @@ def calendar_settings_section():
         try:
             rows = client.table(calendar_sync.FEEDS_TABLE).select("*").limit(1).execute().data
         except Exception:
+            logging.getLogger(__name__).debug("Handled error in calendar_settings_section", exc_info=True)
             st.info("Run supabase_migration_calendar.sql in Supabase once to enable calendar auto-join.")
             return
         feed = rows[0] if rows else None
@@ -1841,13 +1869,13 @@ def calendar_settings_section():
         google_connected = bool(feed and feed.get("google_refresh_token"))
         if google_calendar.is_configured():
             if google_connected:
-                st.success("Google Calendar is connected.", icon=":material/check_circle:")
-            else:
-                st.link_button(
-                    "Connect Google Calendar",
-                    google_calendar.authorization_url(st.session_state.get("user_id")),
-                    icon=":material/event:",
-                )
+                st.caption("Google Calendar account linked. Reconnect if access has expired or was revoked.")
+            st.link_button(
+                "Reconnect Google Calendar" if google_connected else "Connect Google Calendar",
+                google_calendar.authorization_url(st.session_state.get("user_id")),
+                icon=":material/event:",
+            )
+            if not google_connected:
                 st.caption("Read-only access. After approving, sign in again if asked and you'll land back here.")
                 with st.expander("Connection details (for troubleshooting)"):
                     st.write("Redirect URI sent to Google (must be listed exactly in the OAuth client):")
@@ -1893,12 +1921,17 @@ def calendar_settings_section():
                 st.success("Calendar saved.")
                 st.rerun()
             except Exception as error:
+                logging.getLogger(__name__).debug("Handled error in calendar_settings_section", exc_info=True)
                 st.error(f"Could not save: {error}")
         if feed and (google_connected or feed.get("ics_url")):
             try:
-                now = datetime.now(timezone.utc)
+                now = datetime.now(UTC)
                 upcoming = calendar_sync.feed_events(feed, now, now + timedelta(days=7))
+            except google_calendar.CalendarReconnectRequired as error:
+                st.warning(str(error))
+                upcoming = None
             except Exception as error:
+                logging.getLogger(__name__).debug("Handled error in calendar_settings_section", exc_info=True)
                 st.warning(f"Could not read your calendar: {error}")
                 upcoming = None
             if upcoming is not None:
@@ -1985,6 +2018,7 @@ def settings_page():
                 with st.spinner("Checking Ollama API access..."):
                     get_ollama_client().list()
             except Exception as error:
+                logging.getLogger(__name__).debug("Handled error in settings_page", exc_info=True)
                 status_code = getattr(error, "status_code", None)
                 if status_code == 401:
                     message = "Ollama rejected the API key. Check OLLAMA_API_KEY in app secrets."

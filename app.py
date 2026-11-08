@@ -1,5 +1,6 @@
 import json
-from datetime import datetime, timezone
+import logging
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import streamlit as st
@@ -28,6 +29,7 @@ def login_screen():
                 )
                 save_login(response)
             except Exception:
+                logging.getLogger(__name__).debug("Handled error in login_screen", exc_info=True)
                 st.error("Sign-in failed. Check your credentials and confirm your email.")
             else:
                 st.rerun()
@@ -42,6 +44,7 @@ def login_screen():
             try:
                 new_client().auth.sign_up({"email": email.strip(), "password": password})
             except Exception:
+                logging.getLogger(__name__).debug("Handled error in login_screen", exc_info=True)
                 st.error("Account registration could not be completed.")
             else:
                 st.success("Check your email for a verification link, then return to sign in.")
@@ -54,7 +57,7 @@ def load_jsonl(data):
             continue
         record = json.loads(line)
         if not isinstance(record, dict):
-            raise ValueError("Invalid transcript entry")
+            raise ValueError("Invalid transcript entry")  # noqa: TRY004 - malformed uploaded data, not a caller type error.
         text = str(record.get("text", "")).strip()
         if text:
             entries.append(
@@ -106,12 +109,13 @@ def upload_meeting(db):
                 "transcript": transcript,
                 "notes": notes,
                 "status": "uploaded",
-                "recorded_at": datetime.now(timezone.utc).isoformat(),
+                "recorded_at": datetime.now(UTC).isoformat(),
             }
         ).execute()
     except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as error:
         st.error(f"Invalid upload: {error}")
     except Exception:
+        logging.getLogger(__name__).debug("Handled error in upload_meeting", exc_info=True)
         st.error("Unable to save meeting.")
     else:
         st.success("Meeting saved securely.")
@@ -188,6 +192,7 @@ def main():
     try:
         db = client_for_user()
     except Exception:
+        logging.getLogger(__name__).debug("Handled error in main", exc_info=True)
         st.session_state.clear()
         st.warning("Session expired. Please sign in.")
         login_screen()

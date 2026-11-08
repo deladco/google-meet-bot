@@ -2,7 +2,6 @@ import argparse
 import re
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime, timezone
 from pathlib import Path
 
 from remote_config import get_ollama_client, get_ollama_model, get_setting

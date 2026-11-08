@@ -7,7 +7,7 @@ answer that cites them. Requires supabase_migration_rag.sql.
 """
 import json
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from remote_config import get_ollama_client, get_ollama_model
 
@@ -132,7 +132,7 @@ def index_missing(client):
 
 def time_window(question, now=None):
     """Turns phrases like 'last week' into a start time, or None."""
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     text = question.lower()
     if "yesterday" in text:
         return (now - timedelta(days=2)).isoformat()

@@ -7,15 +7,16 @@ change is needed:
 """
 import copy
 import hashlib
+import logging
 import uuid
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 MEETINGS_TABLE = "synced_meetings"
 EMPTY_VALUES = {"", "not specified", "none", "n/a", "tbd"}
 
 
 def now_iso():
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 def is_blank(value):
@@ -304,7 +305,8 @@ def save_minutes(client, meeting, minutes, user_id=None):
 
         fields["notes"] = ai_agent.render_markdown(minutes)
     except Exception:
-        pass  # keep the old notes if they can't be regenerated
+        logging.getLogger(__name__).debug("Handled error in save_minutes", exc_info=True)
+        # keep the old notes if they can't be regenerated
     client.table(MEETINGS_TABLE).update(fields).eq("meeting_id", meeting["id"]).execute()
     meeting["minutes"] = minutes
     if "notes" in fields:
@@ -316,5 +318,6 @@ def save_minutes(client, meeting, minutes, user_id=None):
                 client, meeting["id"], meeting["recorded_at"], meeting["transcript"], fields["notes"], user_id=user_id
             )
         except Exception:
-            pass  # search index is refreshed later by index_missing
+            logging.getLogger(__name__).debug("Handled error in save_minutes", exc_info=True)
+            # search index is refreshed later by index_missing
     return meeting

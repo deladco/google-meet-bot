@@ -1,13 +1,15 @@
+import logging
 import os
 import signal
 import subprocess
 import sys
 import time
 import webbrowser
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
+
 from meeting_history import MeetingHistory
 
 PROJECT_DIR = Path(__file__).resolve().parent
@@ -46,8 +48,8 @@ def classify_analysis_failure(returncode, stdout="", stderr=""):
     if "Transcript is too short for reliable meeting notes" in output:
         return (
             "too_short_to_analyze",
-            "Meeting was too short to analyze. The transcript is saved; record "
-            "more audio before generating minutes.",
+            ("Meeting was too short to analyze. The transcript is saved; record "
+            "more audio before generating minutes."),
         )
 
     detail = next(
@@ -71,7 +73,7 @@ def start_recording(meet_url, consent_confirmed, device_indices=None):
     history = MeetingHistory()
     history.create_meeting(
         meeting_id=session_id,
-        timestamp=datetime.now(timezone.utc).isoformat(),
+        timestamp=datetime.now(UTC).isoformat(),
         transcript_path=transcript_path,
         notes_path=notes_path,
         minutes_path=minutes_path,
@@ -167,6 +169,7 @@ def finish_recording(session):
         diarize_transcript(audio_path, transcript_path)
         history.index_file(meeting_id, "transcript", transcript_path)
     except Exception as error:
+        logging.getLogger(__name__).debug("Handled error in finish_recording", exc_info=True)
         print(f"Speaker diarization unavailable: {error}")
         history.update_status(meeting_id, "diarization_unavailable", error=str(error))
 

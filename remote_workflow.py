@@ -1,11 +1,12 @@
 import gc
 import json
+import logging
 import os
 import subprocess
 import sys
 import tempfile
 import wave
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
 from uuid import uuid4
@@ -21,7 +22,12 @@ from ai_agent import (
 )
 from meeting_history import MeetingHistory
 from remote_config import get_setting
-from transcript_quality import clean_audio, correct_transcript, learn_vocabulary, vocabulary
+from transcript_quality import (
+    clean_audio,
+    correct_transcript,
+    learn_vocabulary,
+    vocabulary,
+)
 
 PROJECT_DIR = Path(__file__).resolve().parent
 load_dotenv(dotenv_path=PROJECT_DIR / ".env")
@@ -49,9 +55,8 @@ def _add_cuda_dll_dirs():
 
 @lru_cache(maxsize=1)
 def _whisper_model():
-    from faster_whisper import WhisperModel
-
     import ctranslate2
+    from faster_whisper import WhisperModel
 
     _add_cuda_dll_dirs()
     # GPU: large-v3-turbo is far more accurate for Ukrainian/Russian than base. CPU hosts keep a smaller model.
@@ -86,6 +91,7 @@ def _diarize_in_subprocess(wav_path, transcript_path, token, timeout=900):
             capture_output=True,
             text=True,
             timeout=timeout,
+            check=False,  # Return codes are translated into actionable errors below.
         )
     except subprocess.TimeoutExpired as error:
         raise RuntimeError("Speaker identification timed out; speakers remain Unknown.") from error
@@ -130,18 +136,6 @@ def _is_hallucination(segment):
     if getattr(segment, "avg_logprob", 0.0) < -1.0:
         return True
     return getattr(segment, "compression_ratio", 0.0) > 2.4
-
-
-def _drop_repeated_loops(entries):
-    # Whisper often loops one phrase on noise; keep a phrase at most twice.
-    seen = {}
-    kept = []
-    for entry in entries:
-        key = "".join(ch for ch in entry["text"].casefold() if ch.isalnum())
-        seen[key] = seen.get(key, 0) + 1
-        if seen[key] <= 2:
-            kept.append(entry)
-    return kept
 
 
 def _transcribe_samples(whisper, samples, meeting_time, vad_filter, language=None):
@@ -190,7 +184,9 @@ def _transcribe_once(whisper, samples, meeting_time, vad_filter, language=None):
                 "text": text,
             }
         )
-    return _drop_repeated_loops(entries)
+    # Repeated phrases can be real responses, even within one speaker's turn.
+    # Reject hallucinations using segment confidence above, not phrase frequency.
+    return entries
 
 
 def process_uploaded_recording(
@@ -211,12 +207,12 @@ def process_uploaded_recording(
         raise ValueError(f"Unsupported audio file type. Upload one of: {allowed}")
 
     OUTPUT.mkdir(parents=True, exist_ok=True)
-    session_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
+    session_id = datetime.now(UTC).strftime("%Y%m%d_%H%M%S_%f")
     session_id += "_" + uuid4().hex[:8]
     transcript_path = OUTPUT / f"transcript_{session_id}.jsonl"
     notes_path = OUTPUT / f"notes_{session_id}.md"
     minutes_path = OUTPUT / f"minutes_{session_id}.json"
-    meeting_time = datetime.now(timezone.utc)
+    meeting_time = datetime.now(UTC)
     history = MeetingHistory()
     history.create_meeting(
         meeting_id=session_id,
@@ -306,6 +302,7 @@ def process_uploaded_recording(
                     history.index_file(session_id, "transcript", transcript_path)
                     diarization_status = "completed"
                 except Exception as error:
+                    logging.getLogger(__name__).debug("Handled error in process_uploaded_recording", exc_info=True)
                     diarization_status = "unavailable"
                     history.update_status(
                         session_id,

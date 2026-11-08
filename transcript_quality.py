@@ -1,5 +1,6 @@
 import difflib
 import json
+import logging
 import os
 from pathlib import Path
 
@@ -51,6 +52,7 @@ def learn_vocabulary(entries, meeting_id):
 
         client, model = get_ollama_client(), get_ollama_model()
     except Exception:
+        logging.getLogger(__name__).debug("Handled error in learn_vocabulary", exc_info=True)
         return []
 
     texts = [e.get("text", "") for e in entries]
@@ -75,6 +77,7 @@ def learn_vocabulary(entries, meeting_id):
             )
             terms = json.loads(response.message.content).get("terms", [])
         except Exception:
+            logging.getLogger(__name__).debug("Handled error in learn_vocabulary", exc_info=True)
             continue
         for term in terms if isinstance(terms, list) else []:
             if not isinstance(term, str):
@@ -162,6 +165,7 @@ def correct_transcript(entries):
 
         client, model = get_ollama_client(), get_ollama_model()
     except Exception:
+        logging.getLogger(__name__).debug("Handled error in correct_transcript", exc_info=True)
         return entries, 0
 
     terms = vocabulary()
@@ -173,6 +177,7 @@ def correct_transcript(entries):
         try:
             fixes = _correct_batch(client, model, batch, terms, context)
         except Exception:
+            logging.getLogger(__name__).debug("Handled error in correct_transcript", exc_info=True)
             continue
         for fix in fixes if isinstance(fixes, list) else []:
             index, text = fix.get("i"), fix.get("text")

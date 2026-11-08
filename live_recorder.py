@@ -5,6 +5,7 @@ live captions while the recording is still going. When cloud storage isn't avail
 in the browser and returned to Python when it stops (the old behaviour).
 """
 import base64
+import logging
 from types import SimpleNamespace
 
 import streamlit as st
@@ -365,7 +366,8 @@ def live_recorder(*, source="mic", enabled=True, language=None, key="live_record
                 email=st.session_state.get("supabase_user"),
             )
         except Exception:
-            pass  # the recorder falls back to keeping audio in the browser
+            logging.getLogger(__name__).debug("Handled error in live_recorder", exc_info=True)
+            # the recorder falls back to keeping audio in the browser
     result = _COMPONENT(
         data=data,
         key=key,

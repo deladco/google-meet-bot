@@ -2,16 +2,16 @@ import json
 import os
 import signal
 import wave
-from contextlib import ExitStack
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from contextlib import ExitStack
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
 import soundcard as sc
 from dotenv import load_dotenv
-from scipy.signal import resample_poly
 from faster_whisper import WhisperModel
+from scipy.signal import resample_poly
 
 # Audio configuration
 SAMPLE_RATE = 48000
@@ -163,7 +163,7 @@ def transcribe_live(
                             audio, 1, 3
                         ).astype(np.float32)
 
-                        segments, info = model.transcribe(
+                        segments, _info = model.transcribe(
                             audio_16k,
                             beam_size=3,
                             vad_filter=True,
@@ -171,7 +171,7 @@ def transcribe_live(
                         )
 
                         timestamp = datetime.now(
-                            timezone.utc
+                            UTC
                         ).isoformat()
 
                         for segment in segments:

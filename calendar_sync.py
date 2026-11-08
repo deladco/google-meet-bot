@@ -5,9 +5,10 @@ The app stores the link in `calendar_feeds`; bot_worker.py calls `sync_feeds` ab
 """
 import html
 import ipaddress
+import logging
 import re
 import socket
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from urllib.parse import unquote, urlparse
 
 import httpx
@@ -81,9 +82,9 @@ def meeting_link(event):
 
 def _as_utc(value):
     if isinstance(value, datetime):
-        return value.astimezone(timezone.utc) if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        return value.astimezone(UTC) if value.tzinfo else value.replace(tzinfo=UTC)
     if isinstance(value, date):
-        return datetime(value.year, value.month, value.day, tzinfo=timezone.utc)
+        return datetime(value.year, value.month, value.day, tzinfo=UTC)
     return None
 
 
@@ -124,13 +125,14 @@ def feed_events(feed, start, end):
 
 def sync_feeds(db):
     """Queue a bot for every enabled feed's meeting that is starting now. Returns jobs queued."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     queued = 0
     feeds = db.table(FEEDS_TABLE).select("*").eq("enabled", True).execute().data
     for feed in feeds:
         try:
             events = feed_events(feed, now - JOIN_LATE, now + JOIN_EARLY)
         except Exception as error:
+            logging.getLogger(__name__).debug("Handled error in sync_feeds", exc_info=True)
             print("Calendar sync failed for", feed.get("user_email"), "-", error)
             continue
         for event in events:
@@ -154,5 +156,5 @@ def sync_feeds(db):
                 print("Queued calendar meeting:", event["title"])
             except Exception:
                 # The unique (user_id, event_key) index means this one was already queued.
-                pass
+                logging.getLogger(__name__).debug("Handled error in sync_feeds", exc_info=True)
     return queued

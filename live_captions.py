@@ -1,6 +1,7 @@
 """Near-real-time captions: transcribes the growing meeting recording in short chunks."""
+import logging
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
@@ -50,6 +51,7 @@ class LiveCaptions:
         try:
             self._loop()
         except Exception as error:
+            logging.getLogger(__name__).debug("Handled error in _run", exc_info=True)
             print(f"Live captions stopped: {error}", flush=True)
 
     def _loop(self):
@@ -77,7 +79,7 @@ class LiveCaptions:
             offset_seconds = (position - origin) / BYTES_PER_SECOND
             position += len(raw)
             samples = np.frombuffer(raw[: len(raw) // 2 * 2], dtype="<i2").astype(np.float32) / 32768.0
-            entries = _transcribe_samples(_whisper_model(), samples, datetime.now(timezone.utc), True)
+            entries = _transcribe_samples(_whisper_model(), samples, datetime.now(UTC), True)
             added = [f"[{_clock(offset_seconds + e['start'])}] {e['text']}" for e in entries]
             if not added:
                 continue

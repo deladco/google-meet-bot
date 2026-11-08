@@ -5,6 +5,7 @@ A browser opens: sign in to the Google account the bot should use (a dedicated
 account is recommended), then press Enter here. The session is saved to
 bot_google_state.json (git-ignored) and bot_worker.py reuses it to join Google Meet.
 """
+import logging
 import os
 from pathlib import Path
 
@@ -15,14 +16,15 @@ STATE_FILE = Path(os.environ.get("BOT_STATE_FILE") or PROJECT_DIR / "bot_google_
 
 
 def launch(playwright):
-    options = dict(
-        headless=False,
-        ignore_default_args=["--enable-automation"],
-        args=["--disable-blink-features=AutomationControlled"],
-    )
+    options = {
+        "headless": False,
+        "ignore_default_args": ["--enable-automation"],
+        "args": ["--disable-blink-features=AutomationControlled"],
+    }
     try:
         return playwright.chromium.launch(channel="chrome", **options)
     except Exception:
+        logging.getLogger(__name__).debug("Handled error in launch", exc_info=True)
         return playwright.chromium.launch(**options)
 
 

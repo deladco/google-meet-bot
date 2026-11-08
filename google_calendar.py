@@ -6,7 +6,7 @@ app secrets and in the worker's .env. GOOGLE_REDIRECT_URI must match the client'
 import hashlib
 import hmac
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from urllib.parse import urlencode
 
 import httpx
@@ -18,6 +18,10 @@ TOKEN_URL = "https://oauth2.googleapis.com/token"
 EVENTS_URL = "https://www.googleapis.com/calendar/v3/calendars/primary/events"
 SCOPE = "https://www.googleapis.com/auth/calendar.readonly"
 STATE_MAX_AGE = 900
+
+
+class CalendarReconnectRequired(ValueError):
+    """Google rejected the saved refresh token; fresh user consent is required."""
 
 
 def client_id():
@@ -77,6 +81,10 @@ def _token_request(data):
     response = httpx.post(TOKEN_URL, data={"client_id": client_id(), "client_secret": client_secret(), **data}, timeout=20)
     payload = response.json()
     if response.status_code != 200:
+        if payload.get("error") == "invalid_grant" and data.get("grant_type") == "refresh_token":
+            raise CalendarReconnectRequired(
+                "Google Calendar access expired or was revoked. Select Reconnect Google Calendar and sign in again."
+            )
         raise ValueError(payload.get("error_description") or payload.get("error") or "Google sign-in failed.")
     return payload
 
@@ -127,13 +135,13 @@ def fetch_events(refresh_token, start, end, link_finder):
             day = (item.get("start") or {}).get("date")
             if not day:
                 continue
-            when = datetime.fromisoformat(day).astimezone().astimezone(timezone.utc)
+            when = datetime.fromisoformat(day).astimezone().astimezone(UTC)
         else:
-            when = datetime.fromisoformat(begins).astimezone(timezone.utc)
+            when = datetime.fromisoformat(begins).astimezone(UTC)
         finishes = (item.get("end") or {}).get("dateTime")
         events.append(
             {
-                "end": datetime.fromisoformat(finishes).astimezone(timezone.utc) if finishes else None,
+                "end": datetime.fromisoformat(finishes).astimezone(UTC) if finishes else None,
                 "key": f"{item.get('id')}|{when.isoformat()}",
                 "title": item.get("summary") or "Meeting",
                 "start": when,

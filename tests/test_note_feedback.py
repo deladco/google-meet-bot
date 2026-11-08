@@ -1,5 +1,5 @@
-import note_feedback
 import minutes_store
+import note_feedback
 
 
 def test_meeting_project_flows_to_tasks_and_survives_rename_and_delete():

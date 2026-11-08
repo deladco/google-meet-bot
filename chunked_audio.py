@@ -4,7 +4,8 @@ MediaRecorder chunks are pieces of one WebM stream: only the first has the heade
 joined in order and decoded together. A recording whose tab was closed can end mid-packet, so decoding
 keeps whatever was readable instead of failing.
 """
-from datetime import datetime, timezone
+import logging
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
@@ -26,15 +27,15 @@ def newest_activity(chunks):
     for item in chunks:
         raw = item.get("updated_at") or item.get("created_at")
         if raw:
-            stamps.append(datetime.fromisoformat(raw.replace("Z", "+00:00")))
+            stamps.append(datetime.fromisoformat(raw))
     return max(stamps) if stamps else None
 
 
 def is_stale(chunks, fallback_iso):
     last = newest_activity(chunks)
     if last is None:
-        last = datetime.fromisoformat(fallback_iso.replace("Z", "+00:00"))
-    return (datetime.now(timezone.utc) - last).total_seconds() > STALE_SECONDS
+        last = datetime.fromisoformat(fallback_iso)
+    return (datetime.now(UTC) - last).total_seconds() > STALE_SECONDS
 
 
 def download_chunks(db, prefix, chunks, target, done=None):
@@ -58,6 +59,7 @@ def decode_partial(path):
     try:
         container = av.open(str(path))
     except Exception:
+        logging.getLogger(__name__).debug("Handled error in decode_partial", exc_info=True)
         return np.zeros(0, dtype=np.float32)
     try:
         stream = next((s for s in container.streams if s.type == "audio"), None)
@@ -68,7 +70,8 @@ def decode_partial(path):
                 for out in resampler.resample(frame):
                     pieces.append(out.to_ndarray().reshape(-1))
         except Exception:
-            pass  # truncated tail: keep what decoded
+            logging.getLogger(__name__).debug("Handled error in decode_partial", exc_info=True)
+            # truncated tail: keep what decoded
     finally:
         container.close()
     if not pieces:
@@ -120,7 +123,7 @@ class LiveRecordingCaptions:
         piece = samples[self.position:end]
         offset = self.position / SAMPLE_RATE
         self.position = end
-        entries = _transcribe_samples(_whisper_model(), piece, datetime.now(timezone.utc), True)
+        entries = _transcribe_samples(_whisper_model(), piece, datetime.now(UTC), True)
         added = [f"[{int((offset + e['start']) // 60):02d}:{int((offset + e['start']) % 60):02d}] {e['text']}" for e in entries]
         if not added:
             return

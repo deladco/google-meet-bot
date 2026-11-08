@@ -179,7 +179,7 @@ def _parse_minutes_response(response):
 		) from error
 
 	if not isinstance(minutes, dict):
-		raise ValueError(
+		raise ValueError(  # noqa: TRY004 - invalid model output must use the ValueError retry path.
 			"Ollama returned invalid structured minutes. Please try again."
 		)
 	return minutes

@@ -1,4 +1,5 @@
 """Meeting-bot jobs. The app queues a job in Supabase; bot_worker.py joins and records it."""
+from datetime import UTC
 from urllib.parse import urlparse
 
 import auth_db
@@ -38,7 +39,7 @@ def platform_of(url):
     host = (urlparse(url).hostname or "").lower()
     if host == "meet.google.com":
         return "meet"
-    if host.endswith("zoom.us") or host.endswith("zoom.com"):
+    if host.endswith(("zoom.us", "zoom.com")):
         return "zoom"
     if host.endswith("webinar-stars.com"):
         return "webinar"
@@ -72,9 +73,9 @@ def get_job(client, job_id):
 
 def latest_job(client, max_age_hours=12):
     """The signed-in user's newest job (row-level security limits it to their own), if recent."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
-    since = (datetime.now(timezone.utc) - timedelta(hours=max_age_hours)).isoformat()
+    since = (datetime.now(UTC) - timedelta(hours=max_age_hours)).isoformat()
     rows = (
         client.table(JOBS_TABLE)
         .select("*")

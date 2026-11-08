@@ -12,6 +12,7 @@ Audio capture: Windows uses WASAPI loopback (default speakers); Linux needs
 PulseAudio and ffmpeg (see Dockerfile.worker).
 """
 import json
+import logging
 import os
 import re
 import shutil
@@ -21,7 +22,7 @@ import tempfile
 import threading
 import time
 import wave
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -33,8 +34,8 @@ import auth_db
 import calendar_sync
 import chunked_audio
 import meeting_bot
-from meeting_history import MeetingHistory
 from live_captions import LiveCaptions
+from meeting_history import MeetingHistory
 from remote_workflow import process_uploaded_recording
 
 LIVE_CAPTIONS = os.environ.get("BOT_LIVE_CAPTIONS", "1") == "1"
@@ -77,12 +78,12 @@ def service_client():
 
 
 def set_job(db, job_id, **fields):
-    fields["updated_at"] = datetime.now(timezone.utc).isoformat()
+    fields["updated_at"] = datetime.now(UTC).isoformat()
     db.table(meeting_bot.JOBS_TABLE).update(fields).eq("id", job_id).execute()
 
 
 def set_audio_job(db, job_id, **fields):
-    fields["updated_at"] = datetime.now(timezone.utc).isoformat()
+    fields["updated_at"] = datetime.now(UTC).isoformat()
     db.table(AUDIO_TABLE).update(fields).eq("id", job_id).execute()
 
 
@@ -91,7 +92,7 @@ def _audio_step(db, job_id, step):
     try:
         set_audio_job(db, job_id, message=step)
     except Exception:
-        pass
+        logging.getLogger(__name__).debug("Handled error in _audio_step", exc_info=True)
 
 
 def job_status(db, job_id):
@@ -143,6 +144,7 @@ class Recorder:
         try:
             self._record_loopback_inner()
         except Exception as error:
+            logging.getLogger(__name__).debug("Handled error in _record_loopback", exc_info=True)
             print(f"Audio capture stopped: {error}", flush=True)
         finally:
             ole32.CoUninitialize()
@@ -172,7 +174,7 @@ class Recorder:
                 self._process.stdin.write(b"q")
                 self._process.stdin.flush()
             except Exception:
-                pass
+                logging.getLogger(__name__).debug("Handled error in stop", exc_info=True)
             try:
                 self._process.wait(timeout=15)
             except subprocess.TimeoutExpired:
@@ -189,6 +191,7 @@ def _click_first(page, labels, timeout=1500):
                 locator.first.click(timeout=timeout)
                 return True
             except Exception:
+                logging.getLogger(__name__).debug("Handled error in _click_first", exc_info=True)
                 continue
     return False
 
@@ -208,6 +211,7 @@ def _fill_name(page, name):
             if field.input_value(timeout=1000) == name:
                 return True
         except Exception:
+            logging.getLogger(__name__).debug("Handled error in _fill_name", exc_info=True)
             continue
     return False
 
@@ -271,7 +275,7 @@ def _fill_webinar_form(page, name):
             try:
                 label = box.evaluate("e => (e.closest('div')?.parentElement?.innerText || '').toLowerCase()")
             except Exception:
-                pass
+                logging.getLogger(__name__).debug("Handled error in _fill_webinar_form", exc_info=True)
             text = hint + " " + label
             if kind == "email" or "mail" in text:
                 value = email
@@ -282,12 +286,13 @@ def _fill_webinar_form(page, name):
             if not box.input_value():
                 box.fill(value, timeout=2000)
         except Exception:
+            logging.getLogger(__name__).debug("Handled error in _fill_webinar_form", exc_info=True)
             continue
     for box in page.locator("input[type=checkbox]:visible").all():
         try:
             box.check(timeout=1000)
         except Exception:
-            pass
+            logging.getLogger(__name__).debug("Handled error in _fill_webinar_form", exc_info=True)
 
 
 def join_webinar(page, name):
@@ -302,7 +307,7 @@ def join_webinar(page, name):
 
 
 PLAYER_JS = "() => !!document.querySelector('video, audio, canvas')"
-PLAYER_SRC = re.compile(r"youtube|vimeo|rutube|player|stream|live|wss|vk\.com|twitch|kinescope|mux|cdn", re.I)
+PLAYER_SRC = re.compile(r"youtube|vimeo|rutube|player|stream|live|wss|vk\.com|twitch|kinescope|mux|cdn", re.IGNORECASE)
 
 
 def webinar_live(page):
@@ -317,9 +322,11 @@ def webinar_live(page):
                 if frame.evaluate(PLAYER_JS):
                     return True
             except Exception:
+                logging.getLogger(__name__).debug("Handled error in webinar_live", exc_info=True)
                 continue
         return any(PLAYER_SRC.search(getattr(f, "url", "") or "") for f in frames[1:])
     except Exception:
+        logging.getLogger(__name__).debug("Handled error in webinar_live", exc_info=True)
         return False
 
 
@@ -331,6 +338,7 @@ def webinar_debug(page):
         body = " ".join(page_text(page).split())[:140]
         return f"url={page.url.split('?')[0]}; registration_fields_visible={form}; frames={frames[:6]}; text='{body}'"
     except Exception as error:
+        logging.getLogger(__name__).debug("Handled error in webinar_debug", exc_info=True)
         return f"unavailable ({type(error).__name__})"
 
 
@@ -339,6 +347,7 @@ def browser_closed(page, browser):
     try:
         return page.is_closed() or not browser.is_connected()
     except Exception:
+        logging.getLogger(__name__).debug("Handled error in browser_closed", exc_info=True)
         return True
 
 
@@ -353,12 +362,14 @@ def in_meeting(page, platform="meet"):
             if page.get_by_role("button", name=label, exact=True).first.is_visible(timeout=200):
                 return False
         except Exception:
+            logging.getLogger(__name__).debug("Handled error in in_meeting", exc_info=True)
             continue
     for label in ("Leave call", "Hang up"):
         try:
             if page.get_by_role("button", name=label).first.is_visible(timeout=300):
                 return True
         except Exception:
+            logging.getLogger(__name__).debug("Handled error in in_meeting", exc_info=True)
             continue
     return False
 
@@ -367,6 +378,7 @@ def meeting_over(page):
     try:
         body = page.inner_text("body", timeout=1500)
     except Exception:
+        logging.getLogger(__name__).debug("Handled error in meeting_over", exc_info=True)
         return page.is_closed()
     return any(text.lower() in body.lower() for text in ENDED_TEXTS)
 
@@ -391,6 +403,7 @@ def page_text(page):
     try:
         return page.inner_text("body", timeout=1500)
     except Exception:
+        logging.getLogger(__name__).debug("Handled error in page_text", exc_info=True)
         return ""
 
 
@@ -399,6 +412,7 @@ def signed_in():
     try:
         cookies = json.loads(STATE_FILE.read_text(encoding="utf-8")).get("cookies", [])
     except Exception:
+        logging.getLogger(__name__).debug("Handled error in signed_in", exc_info=True)
         return False
     return any(c.get("name") in ("SID", "SAPISID", "__Secure-1PSID") for c in cookies)
 
@@ -495,7 +509,7 @@ def record_meeting(db, job, wav_path):
             try:
                 context.storage_state(path=str(STATE_FILE))  # keep the bot's login for next time
             except Exception:
-                pass
+                logging.getLogger(__name__).debug("Handled error in record_meeting", exc_info=True)
 
             recorder.start()
             if LIVE_CAPTIONS:
@@ -507,10 +521,11 @@ def record_meeting(db, job, wav_path):
             started = time.time()
             while time.time() < deadline:
                 if job_status(db, job["id"]) == "stop_requested":
-                    print("Stop requested from the app after %ds" % (time.time() - started), flush=True)
+                    print(f"Stop requested from the app after {int(time.time() - started)}s", flush=True)
                     break
                 if time.time() - started > 20 and meeting_over(page):
-                    print("Meeting ended after %ds: %s" % (time.time() - started, page_text(page)[:120].replace("\n", " | ")), flush=True)
+                    detail = page_text(page)[:120].replace("\n", " | ")
+                    print(f"Meeting ended after {int(time.time() - started)}s: {detail}", flush=True)
                     break
                 time.sleep(3)
             return True
@@ -521,15 +536,28 @@ def record_meeting(db, job, wav_path):
             try:
                 _click_first(page, ["Leave call", "Leave", "Hang up"], 1000)
             except Exception:
-                pass
+                logging.getLogger(__name__).debug("Handled error in record_meeting", exc_info=True)
             try:
                 browser.close()
             except Exception:
-                pass
+                logging.getLogger(__name__).debug("Handled error in record_meeting", exc_info=True)
 
 
 def run_job(db, job):
-    set_job(db, job["id"], status="joining", message=None)
+    # Claim only a still-queued job. A cancellation or another worker may have
+    # changed it since the queue was read.
+    claimed = (
+        db.table(meeting_bot.JOBS_TABLE)
+        .update({"status": "joining", "message": None,
+                 "updated_at": datetime.now(UTC).isoformat()})
+        .eq("id", job["id"]).eq("status", "queued").execute().data
+    )
+    if not claimed:
+        # Finish queued cancellations without overwriting a concurrently claimed job.
+        db.table(meeting_bot.JOBS_TABLE).update({
+            "status": "cancelled", "updated_at": datetime.now(UTC).isoformat(),
+        }).eq("id", job["id"]).eq("status", "stop_requested").execute()
+        return
     with tempfile.TemporaryDirectory() as temp_dir:
         wav_path = Path(temp_dir) / "meeting.wav"
         if not record_meeting(db, job, wav_path):
@@ -631,7 +659,7 @@ def run_audio_job(db, job):
         )
         db.storage.from_(AUDIO_BUCKET).remove(paths)  # keep no audio after transcription
     except Exception:
-        pass
+        logging.getLogger(__name__).debug("Handled error in run_audio_job", exc_info=True)
 
 
 LIVE_JOBS = {}
@@ -645,6 +673,7 @@ def poll_recording_jobs(db):
             .order("created_at").limit(5).execute().data
         )
     except Exception:
+        logging.getLogger(__name__).debug("Handled error in poll_recording_jobs", exc_info=True)
         jobs = []  # migration not run yet
     active = {job["id"] for job in jobs}
     for job_id in [j for j in LIVE_JOBS if j not in active]:
@@ -670,6 +699,7 @@ def poll_recording_jobs(db):
                 lambda text, job_id=job["id"]: db.table(AUDIO_TABLE).update({"live_transcript": text}).eq("id", job_id).execute(),
             )
         except Exception as error:
+            logging.getLogger(__name__).debug("Handled error in poll_recording_jobs", exc_info=True)
             print("Live recording check failed:", error, flush=True)
 
 
@@ -679,6 +709,7 @@ def poll_audio_jobs(db):
             db.table(AUDIO_TABLE).select("*").eq("status", "queued").order("created_at").limit(1).execute().data
         )
     except Exception:
+        logging.getLogger(__name__).debug("Handled error in poll_audio_jobs", exc_info=True)
         return False  # table not created yet
     if not jobs:
         return False
@@ -687,22 +718,27 @@ def poll_audio_jobs(db):
     try:
         run_audio_job(db, job)
     except Exception as error:
+        logging.getLogger(__name__).debug("Handled error in poll_audio_jobs", exc_info=True)
         print("Audio job failed:", error)
         set_audio_job(db, job["id"], status="failed", message=str(error)[:500])
     return True
 
 
-def main():
-    db = service_client()
+def poll_calendar(db, stop):
+    """Keep discovering events while the main worker records or transcribes."""
+    while not stop.is_set():
+        try:
+            calendar_sync.sync_feeds(db)
+        except Exception as error:
+            logging.getLogger(__name__).debug("Handled error in poll_calendar", exc_info=True)
+            print("Calendar sync skipped:", error, flush=True)
+        if stop.wait(CALENDAR_SYNC_SECONDS):
+            break
+
+
+def worker_loop(db):
     print(f"Bot worker running (headless={HEADLESS}). Waiting for jobs...")
-    last_calendar_sync = 0.0
     while True:
-        if time.time() - last_calendar_sync >= CALENDAR_SYNC_SECONDS:
-            last_calendar_sync = time.time()
-            try:
-                calendar_sync.sync_feeds(db)
-            except Exception as error:
-                print("Calendar sync skipped:", error)
         poll_recording_jobs(db)
         if poll_audio_jobs(db):
             continue
@@ -717,6 +753,7 @@ def main():
                 .data
             )
         except Exception as error:
+            logging.getLogger(__name__).debug("Handled error in worker_loop", exc_info=True)
             print("Could not read jobs:", error)
             jobs = []
         if not jobs:
@@ -727,8 +764,23 @@ def main():
         try:
             run_job(db, job)
         except Exception as error:
+            logging.getLogger(__name__).debug("Handled error in worker_loop", exc_info=True)
             print("Job failed:", error)
             set_job(db, job["id"], status="failed", message=str(error)[:500])
+
+
+def main():
+    db = service_client()
+    # A separate client avoids sharing an HTTP client across the two threads.
+    calendar_db = service_client()
+    stop = threading.Event()
+    calendar_thread = threading.Thread(target=poll_calendar, args=(calendar_db, stop), daemon=True)
+    calendar_thread.start()
+    try:
+        worker_loop(db)
+    finally:
+        stop.set()
+        calendar_thread.join(timeout=5)
 
 
 if __name__ == "__main__":

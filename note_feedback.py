@@ -7,7 +7,7 @@ was wrong. Stored in output/note_feedback.json; only that user's own corrections
 import json
 import os
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 FEEDBACK_FILE = Path(os.environ.get("NOTE_FEEDBACK_FILE") or Path(__file__).resolve().parent / "output" / "note_feedback.json")
@@ -79,7 +79,7 @@ def record_edit(user_id, old_minutes, new_minutes):
     changes = diff_minutes(old_minutes or {}, new_minutes or {})
     if not changes:
         return 0
-    stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    stamp = datetime.now(UTC).isoformat(timespec="seconds")
     with _lock:
         data = _load()
         entries = data.get(str(user_id), []) + [{**change, "at": stamp} for change in changes]

@@ -1,10 +1,12 @@
 import base64
 import json
+import logging
 import threading
 import time
 
 import streamlit as st
-from supabase import Client, create_client as _create_client
+from supabase import Client
+from supabase import create_client as _create_client
 
 from remote_config import get_setting
 
@@ -19,6 +21,7 @@ def _expires_at(token):
         payload = token.split(".")[1]
         return json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4))).get("exp", 0)
     except Exception:
+        logging.getLogger(__name__).debug("Handled error in _expires_at", exc_info=True)
         return 0
 
 
@@ -107,7 +110,7 @@ def sign_out():
     try:
         client_for_user().auth.sign_out()
     except Exception:
-        pass
+        logging.getLogger(__name__).debug("Handled error in sign_out", exc_info=True)
     for key in SESSION_KEYS:
         st.session_state.pop(key, None)
 
@@ -138,6 +141,7 @@ def list_meetings(client, limit=200):
         return query.order("recorded_at", desc=True).limit(limit).execute().data
     except Exception:
         # owner_email column not added yet (supabase_migration_persist.sql)
+        logging.getLogger(__name__).debug("Handled error in list_meetings", exc_info=True)
         query = client.table(MEETINGS_TABLE).select(columns)
         return query.order("recorded_at", desc=True).limit(limit).execute().data
 
@@ -164,6 +168,7 @@ def save_meeting_from_history(client, meeting, owner_email=None, user_id=None):
     try:
         saved = upsert_meeting(client, {**row, "owner_email": owner_email})
     except Exception:
+        logging.getLogger(__name__).debug("Handled error in save_meeting_from_history", exc_info=True)
         saved = upsert_meeting(client, row)
     try:
         import rag
@@ -173,5 +178,6 @@ def save_meeting_from_history(client, meeting, owner_email=None, user_id=None):
             row["transcript"], row["notes"], user_id=user_id,
         )
     except Exception:
-        pass  # search index is optional; Ask re-indexes anything missing
+        logging.getLogger(__name__).debug("Handled error in save_meeting_from_history", exc_info=True)
+        # search index is optional; Ask re-indexes anything missing
     return saved
