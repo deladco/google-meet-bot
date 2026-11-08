@@ -16,6 +16,7 @@ import calendar_sync
 import google_calendar
 import job_retry
 import meeting_bot
+import meeting_notifications
 import minutes_store
 import note_feedback
 import rag
@@ -1113,6 +1114,113 @@ def agenda_section(meetings):
                                 st.error(f"Could not queue the bot: {error}")
             st.divider()
 
+def notification_action(client, user_id, item):
+    if item["kind"] == "completed" and item.get("meeting_id"):
+        label = "Open transcript and minutes"
+    elif item["kind"] == "failed" and item.get("job_id"):
+        label = "Review saved work and retry"
+    elif item["kind"] == "worker_unavailable":
+        label = "View worker status"
+    else:
+        label = None
+    if label and st.button(label, key=f"notification_open_{item['id']}"):
+        try:
+            meeting_notifications.mark_read(client, user_id, item["id"])
+        except Exception:
+            logging.getLogger(__name__).debug("Could not mark notification read", exc_info=True)
+        if item["kind"] == "completed":
+            refresh_meetings()
+            open_meeting(item["meeting_id"])
+        else:
+            if item["kind"] == "failed":
+                key = "active_bot_id" if item.get("job_table") == "bot_jobs" else "active_audio_job"
+                st.session_state[key] = item["job_id"]
+            st.switch_page(PAGE_DASHBOARD)
+
+
+@st.fragment(run_every="30s")
+def notifications_panel():
+    user_id = st.session_state.get("user_id")
+    if not user_id or not st.session_state.get("supabase_user") or not auth_db.is_configured():
+        return
+    now = time.monotonic()
+    same_owner = st.session_state.get("notification_sync_owner") == user_id
+    calendar_warning = same_owner and st.session_state.get("notification_calendar_warning", False)
+    sync_warning = same_owner and st.session_state.get("notification_sync_warning", False)
+    try:
+        client = auth_db.client_for_user()
+        if st.session_state.get("notification_sync_owner") != user_id or now - st.session_state.get("notification_sync_time", 0) >= 30:
+            calendar_warning = sync_warning = False
+            try:
+                meeting_notifications.sync_recent_jobs(client, user_id)
+            except Exception:
+                logging.getLogger(__name__).debug("Recent job alerts could not refresh", exc_info=True)
+                sync_warning = True
+            # Calendar refresh is independent of the worker, so an offline worker
+            # cannot prevent an upcoming-meeting warning in the open app.
+            try:
+                force = now - st.session_state.get("notification_calendar_time", 0) >= 60
+                agenda = calendar_agenda(force=force)
+                if force:
+                    st.session_state["notification_calendar_time"] = now
+                if agenda.get("error"):
+                    calendar_warning = True
+                elif (agenda.get("feed") or {}).get("enabled") and meeting_notifications.upcoming_events(agenda.get("events")):
+                    meeting_notifications.sync_worker_alerts(client, user_id, agenda, worker_availability.read_status(client))
+            except Exception:
+                logging.getLogger(__name__).debug("Upcoming meeting alerts could not refresh", exc_info=True)
+                calendar_warning = True
+            st.session_state["notification_sync_owner"] = user_id
+            st.session_state["notification_sync_time"] = now
+            st.session_state["notification_calendar_warning"] = calendar_warning
+            st.session_state["notification_sync_warning"] = sync_warning
+        items, unread = meeting_notifications.inbox(client, user_id)
+    except Exception:
+        logging.getLogger(__name__).debug("Notifications could not be loaded", exc_info=True)
+        st.caption("Notifications are unavailable. Please contact the administrator.")
+        return
+    previous = st.session_state.get("notification_seen", {})
+    if previous.get("user_id") == user_id:
+        new = [item for item in items if item["id"] not in previous.get("ids", []) and not item.get("read_at")]
+        for item in new[:3]:
+            st.toast(item["title"], icon=":material/notifications:")
+    st.session_state["notification_seen"] = {"user_id": user_id, "ids": [item["id"] for item in items]}
+    with st.popover(f"Notifications ({unread} unread)", icon=":material/notifications:", width="content"):
+        st.caption("In-app alerts refresh every 30 seconds while this app is open.")
+        if sync_warning:
+            st.warning("Recent job alerts could not refresh. Existing notifications are shown; new outcomes may be delayed.")
+        if calendar_warning:
+            st.warning("Upcoming-meeting alerts could not refresh. Check your calendar connection and worker status.")
+        if unread and st.button("Mark all read", key="notifications_mark_all"):
+            try:
+                meeting_notifications.mark_read(client, user_id)
+            except Exception:
+                logging.getLogger(__name__).debug("Could not mark notifications read", exc_info=True)
+                st.error("Could not mark notifications read. Try again.")
+            else:
+                st.rerun()
+        if not items:
+            st.caption("No notifications yet.")
+        for item in items:
+            with st.container(border=True):
+                marker = " · unread" if not item.get("read_at") else ""
+                st.markdown(f"**{item['title']}{marker}**")
+                st.caption(when_full(item["created_at"]))
+                if item["kind"] == "completed":
+                    st.success(item["body"])
+                else:
+                    st.warning(item["body"])
+                notification_action(client, user_id, item)
+                if not item.get("read_at") and st.button("Mark read", key=f"notification_read_{item['id']}"):
+                    try:
+                        meeting_notifications.mark_read(client, user_id, item["id"])
+                    except Exception:
+                        logging.getLogger(__name__).debug("Could not mark notification read", exc_info=True)
+                        st.error("Could not mark notification read. Try again.")
+                    else:
+                        st.rerun()
+
+
 def render_retry_controls(client, job, table, prefix):
     label, explanation = job_retry.description(table, job["status"])
     st.caption(explanation)
@@ -2149,6 +2257,7 @@ st.markdown(f"<style>{THEME_CSS}</style>", unsafe_allow_html=True)
 st.logo(str(LOGO_FILE), size="large")
 navigation = st.navigation([PAGE_DASHBOARD, PAGE_MEETINGS, PAGE_PROJECTS, PAGE_CALENDAR, PAGE_CHAT, PAGE_ACTIONS, PAGE_SETTINGS], position="top")
 handle_google_callback()
+notifications_panel()
 navigation.run()
 st.divider()
 footer = "Created by Daryna Ladanovska · Version 1.1"

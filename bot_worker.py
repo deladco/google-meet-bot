@@ -35,6 +35,7 @@ import calendar_sync
 import chunked_audio
 import job_retry
 import meeting_bot
+import meeting_notifications
 import worker_availability
 from live_captions import LiveCaptions
 from meeting_history import MeetingHistory
@@ -84,14 +85,20 @@ def service_client():
 
 def set_job(db, job_id, **fields):
     fields["updated_at"] = datetime.now(UTC).isoformat()
-    db.table(meeting_bot.JOBS_TABLE).update(fields).eq("id", job_id).execute()
+    rows = db.table(meeting_bot.JOBS_TABLE).update(fields).eq("id", job_id).execute().data
     worker_availability.ACTIVITY.update_job(meeting_bot.JOBS_TABLE, job_id, fields.get("status"))
+    if fields.get("status") == "done" or fields.get("status") in job_retry.FAILURE_STATUSES:
+        for row in rows or []:
+            meeting_notifications.safe_publish_job(db, meeting_bot.JOBS_TABLE, row)
 
 
 def set_audio_job(db, job_id, **fields):
     fields["updated_at"] = datetime.now(UTC).isoformat()
-    db.table(AUDIO_TABLE).update(fields).eq("id", job_id).execute()
+    rows = db.table(AUDIO_TABLE).update(fields).eq("id", job_id).execute().data
     worker_availability.ACTIVITY.update_job(AUDIO_TABLE, job_id, fields.get("status"))
+    if fields.get("status") == "done" or fields.get("status") in job_retry.FAILURE_STATUSES:
+        for row in rows or []:
+            meeting_notifications.safe_publish_job(db, AUDIO_TABLE, row)
 
 
 def _audio_step(db, job_id, step):
