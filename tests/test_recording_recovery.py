@@ -187,7 +187,7 @@ def test_restart_before_audio_does_not_leave_job_stuck(recovery):
     db = Database("joining")
     Checkpoint(root, "bot_jobs", "job").write(stage="recording")
     bw.recover_jobs(db)
-    assert db.row["status"] == "failed" and "Send the bot again" in db.row["message"]
+    assert db.row["status"] == "failed_no_audio" and "Send the bot again" in db.row["message"]
 
 
 def test_interrupted_audio_upload_processing_returns_to_queue(recovery):
@@ -207,7 +207,7 @@ def test_recovery_retries_are_bounded(recovery):
     write_audio(checkpoint.audio)
     checkpoint.write(stage="processing", attempts=3)
     bw.recover_jobs(db)
-    assert db.row["status"] == "failed" and "retry limit" in db.row["message"]
+    assert db.row["status"] == "failed_exhausted" and "retry limit" in db.row["message"]
     assert checkpoint.audio.exists()
 
 

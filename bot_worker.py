@@ -33,6 +33,7 @@ load_dotenv(dotenv_path=PROJECT_DIR / ".env")
 import auth_db
 import calendar_sync
 import chunked_audio
+import job_retry
 import meeting_bot
 import worker_availability
 from live_captions import LiveCaptions
@@ -583,6 +584,9 @@ def record_meeting(db, job, wav_path):
 
 @worker_availability.track_job("bot_jobs")
 def run_job(db, job):
+    if job.get("status") in job_retry.REQUEST_STATUSES:
+        retry_job(db, job, meeting_bot.JOBS_TABLE)
+        return
     # Claim only a still-queued job. A cancellation or another worker may have
     # changed it since the queue was read.
     claimed = (
@@ -659,6 +663,9 @@ def convert_to_wav(source, target):
 @worker_availability.track_job("audio_jobs")
 def run_audio_job(db, job):
     """Transcribe a recording uploaded from the mobile app or streamed in chunks by the browser."""
+    if job.get("status") in job_retry.REQUEST_STATUSES:
+        retry_job(db, job, AUDIO_TABLE)
+        return
     claimed = db.table(AUDIO_TABLE).update({
         "status": "processing", "updated_at": datetime.now(UTC).isoformat(),
     }).eq("id", job["id"]).eq("status", "queued").execute().data
@@ -751,7 +758,7 @@ def poll_recording_jobs(db):
 def poll_audio_jobs(db):
     try:
         jobs = (
-            db.table(AUDIO_TABLE).select("*").eq("status", "queued").order("created_at").limit(1).execute().data
+            db.table(AUDIO_TABLE).select("*").in_("status", ["queued", "retry_requested"]).order("created_at").limit(1).execute().data
         )
     except Exception:
         logging.getLogger(__name__).debug("Handled error in poll_audio_jobs", exc_info=True)
@@ -765,7 +772,7 @@ def poll_audio_jobs(db):
     except Exception as error:
         logging.getLogger(__name__).debug("Handled error in poll_audio_jobs", exc_info=True)
         print("Audio job failed:", error)
-        set_audio_job(db, job["id"], status="failed", message=str(error)[:500])
+        fail_job(db, job, AUDIO_TABLE, error)
     return True
 
 
@@ -779,6 +786,57 @@ def poll_calendar(db, stop):
             print("Calendar sync skipped:", error, flush=True)
         if stop.wait(CALENDAR_SYNC_SECONDS):
             break
+
+
+def fail_job(db, job, table, error):
+    checkpoint = Checkpoint(RECOVERY_DIR, table, job["id"])
+    corrupt = False
+    try:
+        state = checkpoint.read() if checkpoint.path.exists() else {}
+    except (OSError, ValueError):
+        logging.getLogger(__name__).exception("Cannot read retry checkpoint for %s", job["id"])
+        state, corrupt = {}, True
+    if corrupt or state.get("attempts", 0) >= MAX_RECOVERY_ATTEMPTS:
+        status = "failed_exhausted"
+    elif state.get("stage") == "saving" and state.get("result"):
+        status = "failed_saving"
+    elif table == AUDIO_TABLE or (checkpoint.audio.exists() and checkpoint.audio.stat().st_size >= 10_000):
+        status = "failed_processing"
+    else:
+        status = "failed_no_audio"
+    setter = set_job if table == meeting_bot.JOBS_TABLE else set_audio_job
+    setter(db, job["id"], status=status, message=str(error)[:500])
+
+
+def retry_job(db, job, table):
+    """Claim once, then inspect trusted local state instead of trusting a UI hint."""
+    requested = job["status"]
+    if requested not in job_retry.REQUEST_STATUSES:
+        return
+    claimed = db.table(table).update({
+        "status": "processing", "updated_at": datetime.now(UTC).isoformat(),
+        "message": "Checking saved work for retry",
+    }).eq("id", job["id"]).eq("status", requested).execute().data
+    if not claimed:
+        return
+    checkpoint = Checkpoint(RECOVERY_DIR, table, job["id"])
+    state = checkpoint.read() if checkpoint.path.exists() else {}
+    if state.get("attempts", 0) >= MAX_RECOVERY_ATTEMPTS:
+        fail_job(db, job, table, "The retry limit was reached. Retained audio needs manual recovery.")
+        return
+    checkpoint.write(attempts=state.get("attempts", 0) + 1)
+    if state.get("stage") == "saving" and state.get("result"):
+        finish_job(db, job, checkpoint)
+    elif table == AUDIO_TABLE:
+        # Original uploads/chunks remain in private storage until successful saving.
+        set_audio_job(db, job["id"], status="queued", message="Retrying the stored recording")
+    elif checkpoint.audio.exists() and checkpoint.audio.stat().st_size >= 10_000:
+        process_bot_recording(db, job, checkpoint)
+    elif requested == "rejoin_requested":
+        set_job(db, job["id"], status="queued", message="Sending the bot again")
+        run_job(db, {**job, "status": "queued"})
+    else:
+        fail_job(db, job, table, "No usable audio is available on this worker. Send the bot again to capture a new recording.")
 
 
 def recover_jobs(db):
@@ -798,9 +856,15 @@ def recover_jobs(db):
                 checkpoint.cleanup()
                 continue
             job = rows[0]
+            if job["status"] in job_retry.REQUEST_STATUSES:
+                continue  # Explicit retry requests are claimed atomically by the queue loop.
+            if job["status"] == "failed_no_audio" and (
+                not checkpoint.audio.exists() or checkpoint.audio.stat().st_size < 10_000
+            ):
+                continue  # No saved work to recover; wait for an explicit Send bot again.
             if state.get("attempts", 0) >= MAX_RECOVERY_ATTEMPTS:
                 setter = set_job if checkpoint.table == meeting_bot.JOBS_TABLE else set_audio_job
-                setter(db, job["id"], status="failed", message="Recovery retry limit reached. Saved audio is retained on the worker for manual recovery.")
+                setter(db, job["id"], status="failed_exhausted", message="Recovery retry limit reached. Saved audio is retained on the worker for manual recovery.")
                 continue
             checkpoint.write(attempts=state.get("attempts", 0) + 1)
             if state.get("stage") == "saving":
@@ -811,14 +875,12 @@ def recover_jobs(db):
                 checkpoint.write(stage="processing", warning="Worker restarted. Recovered the captured portion; audio during the interruption is unavailable.")
                 process_bot_recording(db, job, checkpoint)
             else:
-                set_job(db, job["id"], status="failed", message="Worker restarted before audio was captured. Send the bot again to join the meeting.")
-                checkpoint.cleanup()
+                set_job(db, job["id"], status="failed_no_audio", message="Worker restarted before audio was captured. Send the bot again to join the meeting.")
         except Exception:
             logging.getLogger(__name__).exception("Could not recover checkpoint %s; retained for the next restart", path.name)
             if checkpoint and job:
                 try:
-                    setter = set_job if checkpoint.table == meeting_bot.JOBS_TABLE else set_audio_job
-                    setter(db, job["id"], status="failed", message="Recovery could not finish. Saved audio is retained; restart the worker to retry.")
+                    fail_job(db, job, checkpoint.table, "Recovery could not finish. Saved work is retained; use the dashboard retry control.")
                 except Exception:
                     logging.getLogger(__name__).exception("Could not publish recovery failure for %s", path.name)
 
@@ -835,7 +897,7 @@ def worker_loop(db):
             jobs = (
                 db.table(meeting_bot.JOBS_TABLE)
                 .select("*")
-                .eq("status", "queued")
+                .in_("status", ["queued", "retry_requested", "rejoin_requested"])
                 .order("created_at")
                 .limit(1)
                 .execute()
@@ -855,7 +917,7 @@ def worker_loop(db):
         except Exception as error:
             logging.getLogger(__name__).debug("Handled error in worker_loop", exc_info=True)
             print("Job failed:", error)
-            set_job(db, job["id"], status="failed", message=str(error)[:500])
+            fail_job(db, job, meeting_bot.JOBS_TABLE, error)
 
 
 def main():

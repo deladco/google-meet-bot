@@ -3,6 +3,7 @@ from datetime import UTC
 from urllib.parse import urlparse
 
 import auth_db
+import job_retry
 
 JOBS_TABLE = "bot_jobs"
 SUPPORTED_HOSTS = (
@@ -14,7 +15,7 @@ SUPPORTED_HOSTS = (
     "webinar-stars.com",
 )
 FINISHED = {"done"}
-FAILED = {"failed", "cancelled"}
+FAILED = job_retry.FAILURE_STATUSES | {"cancelled"}
 STOPPABLE = {"queued", "joining", "recording"}
 # No job at all is the "idle" state; "done" is the completed state.
 STATUS_LABELS = {
@@ -28,6 +29,12 @@ STATUS_LABELS = {
     "done": "Done - the meeting is in your history",
     "failed": "The bot failed",
     "cancelled": "Cancelled",
+    "retry_requested": "Retry requested; waiting for the worker",
+    "rejoin_requested": "Waiting to send the bot again",
+    "failed_processing": "Processing failed; saved audio can be retried",
+    "failed_saving": "Cloud saving failed; processed meeting can be retried",
+    "failed_no_audio": "No usable audio was captured",
+    "failed_exhausted": "The retry limit was reached",
 }
 
 

@@ -75,7 +75,13 @@ Bot recordings and job checkpoints now live under `output/worker_recovery`, conf
 
 On startup, the worker recovers its checkpointed jobs. It repairs incomplete WAV headers and transcribes captured audio, retries interrupted mobile/browser-upload processing from cloud storage, and retries cloud saving of an already processed meeting without retranscribing it. It never automatically rejoins an interrupted call; audio during worker downtime cannot be recovered. A job interrupted before capturing audio fails with instructions to send the bot again. Jobs created before checkpoints were introduced cannot be recovered automatically.
 
-Recovery retries are limited to three worker starts. Recordings and checkpoints are deleted after successful cloud saving; failures retain them for recovery. After the retry limit, inspect the job's `.json` and `.wav` files in the recovery directory for manual recovery. Recovery directories belong to one worker host; an OS lock prevents two local worker processes from using the same directory simultaneously. This is single-host recovery, not a distributed worker lease.
+Automatic recovery and dashboard retries share a limit of three attempts per job, tracked in the worker's checkpoint. Recordings and checkpoints are deleted after successful cloud saving; failures retain them for recovery. After the retry limit, inspect the job's `.json` and `.wav` files in the recovery directory for manual recovery. Recovery directories belong to one worker host; an OS lock prevents two local worker processes from using the same directory simultaneously. This is single-host recovery, not a distributed worker lease.
+
+### Retry failed jobs
+
+The dashboard's **Failed jobs** panel shows recent failed bot and upload jobs for the signed-in user, including after refreshing the page. **Retry processing** reuses retained audio; **Retry saving** uploads the already processed meeting without transcribing it again. For a bot failure with no usable audio, **Send bot again** explicitly joins the meeting again. Older failures offer **Retry saved work**, which checks for a checkpoint and never rejoins automatically. Jobs at the retry limit require manual recovery. Uploaded recordings without usable audio must be uploaded or recorded again.
+
+Requests atomically change the existing job's status, so repeated clicks cannot create duplicate jobs. The worker verifies saved data and enforces the retry count locally. This feature uses the existing text status columns and needs no database migration. Update and restart the worker before using these controls; older workers do not recognize retry-request statuses.
 
 ## Transcription quality
 

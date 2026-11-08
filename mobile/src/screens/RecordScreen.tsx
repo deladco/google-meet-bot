@@ -21,6 +21,11 @@ const STATUS_TEXT: Record<string, string> = {
   processing: "Transcribing and writing your summary",
   done: "Ready in My Meetings",
   failed: "Failed",
+  failed_processing: "Processing failed — retry from the dashboard",
+  failed_saving: "Saving failed — retry from the dashboard",
+  failed_no_audio: "No usable audio — record or upload again",
+  failed_exhausted: "Retry limit reached",
+  retry_requested: "Retry requested — waiting for the worker",
 };
 
 function formatClock(ms: number) {
@@ -173,7 +178,7 @@ export default function RecordScreen() {
             <Card key={job.id}>
               <Text style={styles.title}>{STATUS_TEXT[job.status] ?? job.status}</Text>
               <Muted>{new Date(job.created_at).toLocaleString()}</Muted>
-              {job.status === "failed" && !!job.message && <Muted>{job.message}</Muted>}
+              {(job.status === "failed" || job.status.startsWith("failed_")) && !!job.message && <Muted>{job.message}</Muted>}
             </Card>
           ))}
         </View>

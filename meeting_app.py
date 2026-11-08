@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 import auth_db
 import calendar_sync
 import google_calendar
+import job_retry
 import meeting_bot
 import minutes_store
 import note_feedback
@@ -466,8 +467,9 @@ def audio_job_status():
         st.success("Done. Open **My Meetings** to read the notes and transcript.")
         if job.get("message"):
             st.warning(job["message"])
-    elif status == "failed":
-        st.error(f"Transcription failed: {job.get('message') or 'unknown error'}. Your audio is still stored.")
+    elif status in job_retry.FAILURE_STATUSES:
+        st.error(f"Processing failed: {job.get('message') or 'unknown error'}")
+        render_retry_controls(auth_db.client_for_user(), job, "audio_jobs", "active_audio")
     elif status == "recording":
         st.info(
             "Recording. Your audio is saved to your account every few seconds, so it is safe even if this page closes.",
@@ -631,13 +633,15 @@ def render_bot_status():
         db = auth_db.client_for_user()
         bot_id = st.session_state.get("active_bot_id")
         job = meeting_bot.get_job(db, bot_id) if bot_id else meeting_bot.latest_job(db)
-        if job is None or (not bot_id and not meeting_bot.is_active(job["status"])):
+        if job is None or (not bot_id and job["status"] in {"done", "cancelled"}):
             return False
         st.session_state["active_bot_id"] = job["id"]
         code = job["status"]
         step = {"stop_requested": "recording", "processing": "transcribing"}.get(code, code)
         if code in meeting_bot.FAILED:
             st.error(f"{meeting_bot.describe_status(code)}. {job.get('message') or ''}".strip())
+            if code in job_retry.FAILURE_STATUSES:
+                render_retry_controls(db, job, "bot_jobs", "active_bot")
             return False
         if step in BOT_STEPS:
             st.progress(BOT_STEPS.index(step) / (len(BOT_STEPS) - 1), text=meeting_bot.describe_status(code))
@@ -1109,6 +1113,47 @@ def agenda_section(meetings):
                                 st.error(f"Could not queue the bot: {error}")
             st.divider()
 
+def render_retry_controls(client, job, table, prefix):
+    label, explanation = job_retry.description(table, job["status"])
+    st.caption(explanation)
+    if label and st.button(label, key=f"{prefix}_retry_{table}_{job['id']}", icon=":material/refresh:"):
+        try:
+            job_retry.request(client, table, job, rejoin=label == "Send bot again")
+        except Exception as error:
+            logging.getLogger(__name__).debug("Could not request job retry", exc_info=True)
+            st.error(f"Could not request retry: {error}")
+        else:
+            key = "active_bot_id" if table == "bot_jobs" else "active_audio_job"
+            st.session_state[key] = job["id"]
+            st.toast("Request queued. The worker must be online to continue.")
+            st.rerun()
+
+
+@st.fragment(run_every="15s")
+def failed_jobs_section():
+    if not auth_db.is_configured() or not st.session_state.get("supabase_user"):
+        return
+    client = auth_db.client_for_user()
+    failures = []
+    for table in ("bot_jobs", "audio_jobs"):
+        try:
+            rows = client.table(table).select("id,status,message,created_at").in_(
+                "status", sorted(job_retry.FAILURE_STATUSES),
+            ).order("created_at", desc=True).limit(5).execute().data
+            failures.extend((table, row) for row in rows)
+        except Exception:
+            logging.getLogger(__name__).debug("Could not load failed jobs", exc_info=True)
+            st.warning("Could not load failed jobs. Refresh the dashboard to try again.")
+    if failures:
+        with st.expander(f"Failed jobs ({len(failures)})", expanded=True):
+            for table, job in failures:
+                kind = "Meeting bot" if table == "bot_jobs" else "Uploaded recording"
+                st.markdown(f"**{kind} · {job['created_at'][:10]} · {job['id'][:8]}**")
+                if job.get("message"):
+                    st.error(job["message"])
+                render_retry_controls(client, job, table, "failed_list")
+
+
 @st.fragment(run_every="15s")
 def worker_availability_section():
     if not auth_db.is_configured() or not st.session_state.get("supabase_user"):
@@ -1146,6 +1191,7 @@ def dashboard_page():
 
     st.title("Chief Communication Officer")
     worker_availability_section()
+    failed_jobs_section()
     agenda_section(meetings)
     with st.container(border=True, key="new_meeting"):
         st.subheader("Start a new meeting", anchor=False)
