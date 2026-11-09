@@ -17,6 +17,7 @@ import calendar_sync
 import google_calendar
 import job_retry
 import meeting_bot
+import meeting_cost
 import meeting_notifications
 import minutes_store
 import note_feedback
@@ -1319,6 +1320,17 @@ def dashboard_page():
             if st.button(f"{value}\n\n{label}", key=f"{key}_open", help=tip, width="stretch"):
                 st.switch_page(page)
 
+    cost_totals = meeting_cost.totals(meetings)
+    if cost_totals:
+        st.subheader("Estimated meeting cost")
+        columns = st.columns(min(3, len(cost_totals)))
+        for index, (currency, group) in enumerate(cost_totals.items()):
+            columns[index % len(columns)].metric(
+                currency, f"{group['total']:,.2f}", help=f"Saved estimates for {group['meetings']} meetings",
+            )
+        priced = sum(group["meetings"] for group in cost_totals.values())
+        st.caption(f"{priced} of {len(meetings)} meetings have saved estimates. Currencies are totaled separately; unpriced meetings are excluded.")
+
     projects_section(meetings)
 
     recent_column, ask_column = st.columns([3, 2], gap="large")
@@ -1740,6 +1752,40 @@ def speaker_review_form(meeting, entries):
                 st.rerun()
 
 
+@st.fragment
+def meeting_cost_section(meeting):
+    with st.expander("Meeting cost", icon=":material/payments:"):
+        saved = meeting_cost.saved_estimate(meeting)
+        inferred_duration = meeting_duration_hours(meeting) * 60
+        st.caption("Estimate = duration in hours × participants × average hourly rate per person. Assumes everyone attends the full duration.")
+        if not saved:
+            st.caption("Duration starts from the last transcript timestamp. Adjust it to include silent or untranscribed time. Enter everyone who attended, including silent participants.")
+        prefix = f"cost_{meeting['id']}"
+        duration = st.number_input("Duration (minutes)", min_value=0.0, value=float((saved or {}).get("duration_minutes", inferred_duration)), step=5.0, key=f"{prefix}_duration")
+        participants = st.number_input("Participants", min_value=1, value=int((saved or {}).get("participants", 1)), step=1, key=f"{prefix}_participants")
+        rate = st.number_input("Average hourly rate per person", min_value=0.0, value=float((saved or {}).get("hourly_rate", 0.0)), step=5.0, key=f"{prefix}_rate")
+        currency = st.selectbox("Currency", meeting_cost.CURRENCIES, index=meeting_cost.CURRENCIES.index((saved or {}).get("currency", "GBP")), key=f"{prefix}_currency")
+        try:
+            cost = meeting_cost.estimate(duration, participants, rate, currency)
+        except (ValueError, ArithmeticError) as error:
+            st.info(str(error))
+            return
+        st.metric("Estimated meeting cost", f"{currency} {cost['estimated_cost']:,.2f}")
+        can_save = meeting["source"] == "cloud" and bool(meeting.get("minutes"))
+        if not can_save:
+            st.caption("This is a preview. Saving needs a cloud meeting with generated minutes.")
+        if st.button("Save cost estimate", key=f"{prefix}_save", disabled=not can_save):
+            try:
+                meeting_cost.save(auth_db.client_for_user(), meeting, cost, st.session_state.get("user_id"))
+            except Exception as error:
+                logging.getLogger(__name__).debug("Could not save meeting cost", exc_info=True)
+                st.error(f"Could not save estimate: {error}")
+            else:
+                refresh_meetings()
+                st.toast("Cost estimate saved.")
+                st.rerun()
+
+
 def show_meeting(meeting):
     st.header(meeting_title(meeting))
     st.caption(
@@ -1749,6 +1795,8 @@ def show_meeting(meeting):
     )
     if meeting["error"]:
         st.warning(meeting["error"])
+
+    meeting_cost_section(meeting)
 
     entries = parse_transcript(meeting["transcript"])
     speaker_review_form(meeting, entries)

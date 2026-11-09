@@ -111,4 +111,10 @@ Vocabulary is learned automatically: after each meeting, names and terms found i
 
 ## App layout
 
+### Meeting cost estimates
+
+Open a meeting and expand **Meeting cost**. Enter the duration in minutes, total participants (including silent attendees), average hourly rate per person, and currency. The live estimate assumes all participants attend for the full duration. The initial duration comes from the last transcript timestamp; adjust it for silence, late recording starts, or time after the last recognized speech. Rates are entered by you; the app does not infer salaries or attendance.
+
+Save estimates on cloud meetings with generated minutes. Local-only or transcript-only meetings support a calculator preview. Saved inputs live in the existing minutes JSON, without changing notes, tasks, or approval. The dashboard totals configured meetings by currency; unpriced meetings are excluded and no exchange rates are applied. No migration is required.
+
 The Streamlit app has five pages: **Dashboard** (metrics, **Projects**, recent meetings, quick question, and the bot/record/upload flow), **My Meetings** (searchable history with minutes, transcript and action items), **Ask AI** (questions across your transcripts, needs `supabase_migration_rag.sql`), **Task board** (action items with done state, due dates, projects, owner/due/meeting filters, links back to the meeting and CSV export). Meeting minutes show source timestamps and can be edited and approved; edits, approval and task state are stored inside the meeting's `minutes` JSON (no migration) and work for cloud-saved meetings only and **Settings** (account, transcription language, vocabulary, Ollama connection).
