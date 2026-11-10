@@ -22,6 +22,7 @@ import meeting_notifications
 import minutes_store
 import note_feedback
 import rag
+import share_notes
 import transcript_review
 import worker_availability
 from ai_agent import load_transcript
@@ -1786,6 +1787,62 @@ def meeting_cost_section(meeting):
                 st.rerun()
 
 
+@st.fragment
+def shareable_notes_section(meeting):
+    with st.expander("Prepare shareable notes", icon=":material/share:"):
+        st.caption("Create a separate download. Your original meeting is unchanged, and no public link is created.")
+        scope = f"{st.session_state.get('user_id', 'local')}:{meeting['source']}:{meeting['id']}"
+        prefix = "share_" + hashlib.sha256(scope.encode()).hexdigest()[:16]
+        options = [label for label, key in share_notes.SECTIONS.items() if (
+            bool(meeting.get("transcript")) if key == "transcript" else bool((meeting.get("minutes") or {}).get(key))
+        )]
+        if not options:
+            st.info("No transcript or structured notes are available to prepare a sharing copy.")
+            return
+        selected = st.multiselect("Sections to include", options, default=[label for label in ("Summary", "Decisions", "Action items") if label in options], key=f"{prefix}_sections")
+        title = st.text_input("Document title", value="Meeting notes", key=f"{prefix}_title")
+        owners = st.checkbox("Include task owner fields", value=False, key=f"{prefix}_owners")
+        speakers = st.checkbox("Include speaker labels in transcript", value=False, key=f"{prefix}_speakers")
+        emails = st.checkbox("Remove email addresses", value=True, key=f"{prefix}_emails")
+        phones = st.checkbox("Remove phone numbers", value=True, key=f"{prefix}_phones")
+        phrases = st.text_area("Names or phrases to redact (one per line)", key=f"{prefix}_phrases", help="Matches whole names or phrases, ignoring capitalization. Review the result for information that patterns miss.")
+        st.caption("Omitting owner fields or speaker labels does not remove names mentioned in prose. Add those names above or remove them in the editor.")
+        fingerprint = hashlib.sha256(json.dumps({
+            "minutes": meeting.get("minutes"), "transcript": meeting.get("transcript"),
+            "selected": selected, "title": title, "owners": owners, "speakers": speakers,
+            "emails": emails, "phones": phones, "phrases": phrases,
+        }, sort_keys=True).encode()).hexdigest()
+        draft_key = f"{prefix}_draft"
+        draft = st.session_state.get(draft_key)
+        label = "Rebuild review draft (replaces edits)" if draft else "Create review draft"
+        if st.button(label, key=f"{prefix}_build", disabled=not selected):
+            try:
+                text = share_notes.build(meeting, selected, title=title, owners=owners, speakers=speakers)
+                text = share_notes.redact(text, phrases.splitlines(), emails=emails, phones=phones)
+            except (ValueError, TypeError) as error:
+                st.error(f"Could not build sharing copy: {error}")
+                return
+            generation = (draft or {}).get("generation", 0) + 1
+            draft = {"text": text, "fingerprint": fingerprint, "generation": generation}
+            st.session_state[draft_key] = draft
+        if not draft:
+            return
+        stale = draft["fingerprint"] != fingerprint
+        if stale:
+            st.warning("The meeting or sharing options changed. Rebuild the draft to apply them before downloading.")
+        edited = st.text_area("Edit sharing copy — remove any sensitive sections or details", value=draft["text"], height=320, key=f"{prefix}_editor_{draft['generation']}")
+        final_text = share_notes.redact(edited, phrases.splitlines(), emails=emails, phones=phones)
+        st.markdown("**Exact download preview**")
+        st.code(final_text, language="markdown", wrap_lines=True)
+        st.caption("Pattern matching can miss personal information. Review this exact copy before sharing it.")
+        digest = hashlib.sha256((str(draft["generation"]) + fingerprint + final_text).encode()).hexdigest()[:16]
+        checked = st.checkbox("I reviewed this copy and removed the information I do not want to share.", key=f"{prefix}_checked_{digest}", disabled=stale)
+        st.download_button(
+            "Download shareable notes (.md)", data=final_text, file_name="shareable_meeting_notes.md",
+            mime="text/markdown", key=f"{prefix}_download", disabled=stale or not checked or not final_text.strip(),
+        )
+
+
 def show_meeting(meeting):
     st.header(meeting_title(meeting))
     st.caption(
@@ -1829,6 +1886,7 @@ def show_meeting(meeting):
                     stamp = f"{int(start) // 60:02d}:{int(start) % 60:02d}" if isinstance(start, (int, float)) else ""
                     st.markdown(f"`{stamp}` **{speaker}** {entry.get('text', '')}")
 
+    shareable_notes_section(meeting)
     with st.expander("Downloads", icon=":material/download:"):
         if meeting["notes"]:
             st.download_button(

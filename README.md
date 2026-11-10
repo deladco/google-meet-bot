@@ -117,4 +117,12 @@ Open a meeting and expand **Meeting cost**. Enter the duration in minutes, total
 
 Save estimates on cloud meetings with generated minutes. Local-only or transcript-only meetings support a calculator preview. Saved inputs live in the existing minutes JSON, without changing notes, tasks, or approval. The dashboard totals configured meetings by currency; unpriced meetings are excluded and no exchange rates are applied. No migration is required.
 
+### Prepare shareable notes
+
+Open a meeting and expand **Prepare shareable notes**. Choose which sections to include; transcripts, task-owner fields, and transcript speaker labels require explicit selection. Source quotes, account/approval metadata, internal project fields, and cost estimates are never added automatically. The document title defaults to a generic title rather than the meeting's internal title.
+
+Optionally redact email/phone patterns and enter names or phrases to remove. Owner/speaker field omission does not remove names in prose. Build a draft, edit it to remove sensitive passages, and review the exact download preview. Redaction also applies to text added in the editor. Confirm review before downloading the Markdown document; changing the text resets confirmation, and changing the source or options requires rebuilding the draft. Rebuilding explicitly replaces edits.
+
+The source meeting is unchanged. Drafts stay in the current app session, are scoped to the account and meeting, and are not saved to the database. No public link, external AI request, or message is created by this flow. Redaction uses patterns and literal phrases, not guaranteed anonymization; review the copy for details the patterns miss. No migration is needed.
+
 The Streamlit app has five pages: **Dashboard** (metrics, **Projects**, recent meetings, quick question, and the bot/record/upload flow), **My Meetings** (searchable history with minutes, transcript and action items), **Ask AI** (questions across your transcripts, needs `supabase_migration_rag.sql`), **Task board** (action items with done state, due dates, projects, owner/due/meeting filters, links back to the meeting and CSV export). Meeting minutes show source timestamps and can be edited and approved; edits, approval and task state are stored inside the meeting's `minutes` JSON (no migration) and work for cloud-saved meetings only and **Settings** (account, transcription language, vocabulary, Ollama connection).
